@@ -125,13 +125,11 @@ export default function ProfilePage() {
 
       {/* Hero card */}
       <Card className="border-gray-100 shadow-sm rounded-2xl overflow-hidden">
-        <div className="h-28 bg-gradient-to-r from-[#00468E] via-[#0066CC] to-[#F4951D] relative">
-          <div className="absolute inset-0 opacity-10"
-            style={{ backgroundColor: "#fff" }}
-          />
+        <div className="relative">
+
         </div>
         <CardContent className="px-6 pb-6">
-          <div className="flex flex-col sm:flex-row gap-4 -mt-10 items-start sm:items-end">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
             <Avatar className="h-20 w-20 border-4 border-white shadow-lg">
               <AvatarFallback className="bg-[#00468E] text-white text-2xl font-bold">{initials}</AvatarFallback>
             </Avatar>
