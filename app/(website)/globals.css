@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Top spacing utility for sections */
+.section-top-space {
+  margin-top: 0;
+}
+
+html {
+  scroll-behavior: smooth !important;
+}
+
+.font-devanagari {
+  font-family: 'TiroDevanagariHindi';
+}
+
+@media (min-width: 768px) {
+  .section-top-space {
+    margin-top: 20px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .section-top-space {
+    margin-top: 30px;
+  }
+}
