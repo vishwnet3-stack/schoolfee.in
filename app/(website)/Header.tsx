@@ -216,11 +216,20 @@ export default function Header() {
                 <img src="/images/chm-circle-logo.jpeg" alt="CHM Logo" className="h-14 w-auto" />
 
                 {/* Desktop — User Profile */}
-                <div className="hidden lg:block">
+                <div className="hidden">
                   <UserProfileDropdown />
                 </div>
 
-                {/* Desktop — Become A Member */}
+                {/* Desktop — Join Waitlist button */}
+                <Link
+                  href="/join-waitlist"
+                  className="hidden lg:inline-flex items-center justify-center px-4 h-10 bg-gradient-to-r from-[#F4951D] to-[#e07d0a] hover:from-[#e07d0a] hover:to-[#c96f00] text-white shadow-md hover:shadow-lg transition-all rounded-md font-medium text-sm whitespace-nowrap"
+                >
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Join Waitlist
+                </Link>
+
+                {/* Desktop — Become A Member (original, restored) */}
                 <div className="hidden lg:block relative" ref={desktopDropdownRef}>
                   <button
                     onClick={() => setIsDesktopRegDropdownOpen(!isDesktopRegDropdownOpen)}
@@ -299,10 +308,21 @@ export default function Header() {
 
             {/* Mobile top row */}
             <div className="lg:hidden flex items-center justify-between h-12 gap-2">
-              <div className="flex-1 min-w-0">
+              {/* <div className="flex-1 min-w-0"> */}
+              <div className="hidden">
                 <UserProfileDropdown />
               </div>
 
+              {/* Mobile — Join Waitlist */}
+              <Link
+                href="/join-waitlist"
+                className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-[#F4951D] text-[#F4951D] hover:bg-[#F4951D] hover:text-white rounded-md transition-colors whitespace-nowrap"
+              >
+                <UserPlus className="mr-1 h-3 w-3" />
+                Waitlist
+              </Link>
+
+              {/* Mobile — Become A Member (original, restored) */}
               <div className="relative" ref={mobileDropdownRef}>
                 <button
                   onClick={() => setIsMobileRegDropdownOpen(!isMobileRegDropdownOpen)}

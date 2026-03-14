@@ -1,1064 +1,612 @@
 "use client";
 
-import { useState } from "react";
-import { FaSchool, FaUserTie, FaMapMarkerAlt, FaCheckCircle, FaIdCard } from "react-icons/fa";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { FaIdCard, FaShieldAlt, FaLock } from "react-icons/fa";
 import { IoMdCheckmark } from "react-icons/io";
+import { useAuthSession } from "@/hooks/useAuthSession";
+import {
+  School, MapPin, UserCog, ClipboardCheck,
+  AlertCircle, CheckCircle2, ChevronRight, Globe, Phone, Mail,
+} from "lucide-react";
 
-// ============== SCHOOL REGISTRATION WIZARD PAGE ==============
+declare global { interface Window { Razorpay: any; } }
+const RAZORPAY_KEY_ID = "rzp_test_SNWMyYGGnFaJ0I";
+
+const indianStates = [
+  "Andaman and Nicobar Islands","Andhra Pradesh","Arunachal Pradesh","Assam","Bihar",
+  "Chandigarh","Chhattisgarh","Dadra and Nagar Haveli and Daman and Diu","Delhi","Goa",
+  "Gujarat","Haryana","Himachal Pradesh","Jharkhand","Karnataka","Kerala","Ladakh",
+  "Lakshadweep","Madhya Pradesh","Maharashtra","Manipur","Meghalaya","Mizoram","Nagaland",
+  "Odisha","Puducherry","Punjab","Rajasthan","Sikkim","Tamil Nadu","Telangana","Tripura",
+  "Uttar Pradesh","Uttarakhand","West Bengal",
+];
+
+const schoolTypes = ["Government","Government Aided","Private Unaided","Central Government","International","Other"];
+
+const affiliationBoards = [
+  "CBSE (Central Board of Secondary Education)",
+  "ICSE (Indian Certificate of Secondary Education)",
+  "State Board",
+  "IB (International Baccalaureate)",
+  "IGCSE (Cambridge)",
+  "NIOS (National Institute of Open Schooling)",
+  "Other",
+];
+
+type FormData = {
+  school_name: string; school_type: string; established_year: string;
+  affiliation_board: string; otherAffiliationBoard: string; affiliation_id: string;
+  school_address: string; city: string; state: string; pincode: string;
+  contact_number: string; alternate_contact: string;
+  official_email: string; website_url: string;
+  principal_name: string; principal_email: string; principal_contact: string;
+  total_students: string; total_teachers: string; infrastructure_details: string;
+};
+
 export default function SchoolRegistrationPage() {
+  const router = useRouter();
+  const { user, isLoading } = useAuthSession();
+
   const [currentStep, setCurrentStep] = useState(1);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [agreed, setAgreed] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPaymentProcessing, setIsPaymentProcessing] = useState(false);
 
-  const indianStates = [
-    "Andaman and Nicobar Islands",
-    "Andhra Pradesh",
-    "Arunachal Pradesh",
-    "Assam",
-    "Bihar",
-    "Chandigarh",
-    "Chhattisgarh",
-    "Dadra and Nagar Haveli and Daman and Diu",
-    "Delhi",
-    "Goa",
-    "Gujarat",
-    "Haryana",
-    "Himachal Pradesh",
-    "Jharkhand",
-    "Karnataka",
-    "Kerala",
-    "Ladakh",
-    "Lakshadweep",
-    "Madhya Pradesh",
-    "Maharashtra",
-    "Manipur",
-    "Meghalaya",
-    "Mizoram",
-    "Nagaland",
-    "Odisha",
-    "Puducherry",
-    "Punjab",
-    "Rajasthan",
-    "Sikkim",
-    "Tamil Nadu",
-    "Telangana",
-    "Tripura",
-    "Uttar Pradesh",
-    "Uttarakhand",
-    "West Bengal",
-  ];
-
-  const schoolTypes = [
-    "Government",
-    "Government Aided",
-    "Private Unaided",
-    "Central Government",
-    "International",
-    "Other"
-  ];
-
-  const affiliationBoards = [
-    "CBSE (Central Board of Secondary Education)",
-    "ICSE (Indian Certificate of Secondary Education)",
-    "State Board",
-    "IB (International Baccalaureate)",
-    "IGCSE (Cambridge)",
-    "NIOS (National Institute of Open Schooling)",
-    "Other"
-  ];
-
-  const [formData, setFormData] = useState({
-    // Step 1: School Basic Information
-    school_name: "",
-    school_type: "",
-    established_year: "",
-    affiliation_board: "",
-    otherAffiliationBoard: "",
-    affiliation_id: "",
-    // Step 2: Contact & Location
-    school_address: "",
-    city: "",
-    state: "",
-    pincode: "",
-    contact_number: "",
-    alternate_contact: "",
-    official_email: "",
-    website_url: "",
-    // Step 3: Administrative Details
-    principal_name: "",
-    principal_email: "",
-    principal_contact: "",
-    total_students: "",
-    total_teachers: "",
-    infrastructure_details: "",
+  const [formData, setFormData] = useState<FormData>({
+    school_name: "", school_type: "", established_year: "",
+    affiliation_board: "", otherAffiliationBoard: "", affiliation_id: "",
+    school_address: "", city: "", state: "", pincode: "",
+    contact_number: "", alternate_contact: "",
+    official_email: "", website_url: "",
+    principal_name: "", principal_email: "", principal_contact: "",
+    total_students: "", total_teachers: "", infrastructure_details: "",
   });
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    document.body.appendChild(script);
+    return () => { try { document.body.removeChild(script); } catch {} };
+  }, []);
 
-    if (errors[name]) {
-      setErrors((prev) => ({ ...prev, [name]: "" }));
-    }
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(135deg, #00305F 0%, #00468E 50%, #0058B4 100%)" }}>
+        <div className="text-center">
+          <div className="w-14 h-14 border-4 border-white/20 border-t-white rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-white/70 text-sm font-medium tracking-wide">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: "" }));
   };
 
+  const inp = (err?: string) =>
+    `w-full px-3 py-2 rounded-[8px] border text-sm font-medium transition-all duration-200 outline-none` +
+    (err
+      ? " border-red-400 bg-red-50 text-red-900 placeholder-red-300 focus:ring-2 focus:ring-red-200"
+      : " border-slate-300 bg-white text-slate-800 placeholder-slate-400 hover:border-[#00468E]/50 focus:border-[#00468E] focus:ring-2 focus:ring-[#00468E]/10"
+    );
+
+  const lbl = "block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2";
+
+  const errMsg = (msg?: string) => msg ? (
+    <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+      <AlertCircle className="h-3 w-3 shrink-0" />{msg}
+    </p>
+  ) : null;
+
   const validateStep1 = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.school_name.trim()) newErrors.school_name = "School name is required";
-    if (!formData.school_type) newErrors.school_type = "School type is required";
-    if (!formData.established_year) newErrors.established_year = "Established year is required";
-    const currentYear = new Date().getFullYear();
-    if (formData.established_year && (parseInt(formData.established_year) < 1800 || parseInt(formData.established_year) > currentYear)) {
-      newErrors.established_year = `Year must be between 1800 and ${currentYear}`;
-    }
-    if (!formData.affiliation_board) newErrors.affiliation_board = "Affiliation board is required";
-    if (formData.affiliation_board === "Other" && !formData.otherAffiliationBoard.trim())
-      newErrors.otherAffiliationBoard = "Please specify affiliation board";
-    if (!formData.affiliation_id.trim()) newErrors.affiliation_id = "Affiliation ID is required";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const e: Record<string, string> = {};
+    if (!formData.school_name.trim()) e.school_name = "School name is required";
+    if (!formData.school_type) e.school_type = "School type is required";
+    if (!formData.established_year) e.established_year = "Established year is required";
+    const yr = parseInt(formData.established_year);
+    if (formData.established_year && (yr < 1800 || yr > new Date().getFullYear())) e.established_year = `Year must be between 1800 and ${new Date().getFullYear()}`;
+    if (!formData.affiliation_board) e.affiliation_board = "Affiliation board is required";
+    if (formData.affiliation_board === "Other" && !formData.otherAffiliationBoard.trim()) e.otherAffiliationBoard = "Please specify affiliation board";
+    if (!formData.affiliation_id.trim()) e.affiliation_id = "Affiliation ID is required";
+    setErrors(e); return Object.keys(e).length === 0;
   };
 
   const validateStep2 = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.school_address.trim()) newErrors.school_address = "School address is required";
-    if (!formData.city.trim()) newErrors.city = "City is required";
-    if (!formData.state) newErrors.state = "State is required";
-    if (!formData.pincode.match(/^\d{6}$/))
-      newErrors.pincode = "Valid 6-digit pincode is required";
-    if (!formData.contact_number.match(/^\d{10}$/))
-      newErrors.contact_number = "Valid 10-digit contact number is required";
-    if (formData.alternate_contact && !formData.alternate_contact.match(/^\d{10}$/))
-      newErrors.alternate_contact = "Valid 10-digit alternate contact is required";
-    if (!formData.official_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
-      newErrors.official_email = "Valid email is required";
-    if (formData.website_url && !formData.website_url.match(/^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/))
-      newErrors.website_url = "Valid website URL is required";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const e: Record<string, string> = {};
+    if (!formData.school_address.trim()) e.school_address = "School address is required";
+    if (!formData.city.trim()) e.city = "City is required";
+    if (!formData.state) e.state = "State is required";
+    if (!formData.pincode.match(/^\d{6}$/)) e.pincode = "Valid 6-digit pincode is required";
+    if (!formData.contact_number.match(/^\d{10}$/)) e.contact_number = "Valid 10-digit contact number is required";
+    if (formData.alternate_contact && !formData.alternate_contact.match(/^\d{10}$/)) e.alternate_contact = "Valid 10-digit alternate contact required";
+    if (!formData.official_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) e.official_email = "Valid email is required";
+    setErrors(e); return Object.keys(e).length === 0;
   };
 
   const validateStep3 = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.principal_name.trim()) newErrors.principal_name = "Principal name is required";
-    if (!formData.principal_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/))
-      newErrors.principal_email = "Valid principal email is required";
-    if (!formData.principal_contact.match(/^\d{10}$/))
-      newErrors.principal_contact = "Valid 10-digit contact number is required";
-    if (!formData.total_students || parseInt(formData.total_students) <= 0)
-      newErrors.total_students = "Valid number of students is required";
-    if (!formData.total_teachers || parseInt(formData.total_teachers) <= 0)
-      newErrors.total_teachers = "Valid number of teachers is required";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    const e: Record<string, string> = {};
+    if (!formData.principal_name.trim()) e.principal_name = "Principal name is required";
+    if (!formData.principal_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) e.principal_email = "Valid principal email is required";
+    if (!formData.principal_contact.match(/^\d{10}$/)) e.principal_contact = "Valid 10-digit contact number is required";
+    if (!formData.total_students || parseInt(formData.total_students) <= 0) e.total_students = "Valid number of students is required";
+    if (!formData.total_teachers || parseInt(formData.total_teachers) <= 0) e.total_teachers = "Valid number of teachers is required";
+    setErrors(e); return Object.keys(e).length === 0;
   };
 
   const handleNext = () => {
-    let isValid = false;
-    if (currentStep === 1) isValid = validateStep1();
-    if (currentStep === 2) isValid = validateStep2();
-    if (currentStep === 3) isValid = validateStep3();
-
-    if (isValid) {
-      setCurrentStep(currentStep + 1);
-      setErrors({});
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
+    let valid = false;
+    if (currentStep === 1) valid = validateStep1();
+    if (currentStep === 2) valid = validateStep2();
+    if (currentStep === 3) valid = validateStep3();
+    if (valid) { setCurrentStep(p => p + 1); setErrors({}); window.scrollTo({ top: 0, behavior: "smooth" }); }
   };
 
   const handlePrevious = () => {
-    setCurrentStep(currentStep - 1);
-    setErrors({});
+    setCurrentStep(p => p - 1); setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleSubmit = () => {
-    if (agreed) {
-      console.log("School Registration Complete:", formData);
-      alert("School registration submitted successfully!");
-      // Redirect or reset form
-    } else {
-      alert("Please agree to the terms before submitting");
+  const handlePaymentAndSubmit = async () => {
+    if (!agreed) { toast.error("Please agree to the terms before submitting"); return; }
+    setIsPaymentProcessing(true);
+    try {
+      const orderRes = await fetch("/api/public/razorpay-school-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: formData.official_email, name: formData.school_name }),
+      });
+      const orderData = await orderRes.json();
+      if (!orderData.success) throw new Error(orderData.error || "Order creation failed");
+      const { order } = orderData;
+      const options = {
+        key: RAZORPAY_KEY_ID,
+        amount: order.amount,
+        currency: order.currency,
+        name: "Schoolfee.org",
+        description: "School Registration Fee — Rs.1111",
+        image: "/logo.jpg",
+        order_id: order.id,
+        prefill: { name: formData.principal_name, email: formData.official_email, contact: formData.contact_number },
+        theme: { color: "#00468E" },
+        handler: async (response: any) => {
+          setIsPaymentProcessing(false);
+          setIsSubmitting(true);
+          try {
+            const verifyRes = await fetch("/api/public/razorpay-school-verify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                formData,
+                publicUserId: user?.id || null,
+              }),
+            });
+            const verifyData = await verifyRes.json();
+            if (!verifyData.success) throw new Error(verifyData.error || "Verification failed");
+            toast.success("School registration submitted! Check your email for confirmation.");
+            setCurrentStep(5);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          } catch (err: any) {
+            toast.error(err.message || "Submission failed after payment. Contact support.");
+          } finally { setIsSubmitting(false); }
+        },
+        modal: {
+          ondismiss: () => { setIsPaymentProcessing(false); toast.info("Payment cancelled. Your form data is saved."); },
+        },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.on("payment.failed", (response: any) => {
+        setIsPaymentProcessing(false);
+        toast.error(`Payment failed: ${response.error.description}`);
+      });
+      rzp.open();
+    } catch (err: any) {
+      setIsPaymentProcessing(false);
+      toast.error(err.message || "Something went wrong. Please try again.");
     }
   };
 
   const steps = [
-    { number: 1, title: "School Info", icon: <FaSchool />, status: currentStep > 1 ? "completed" : currentStep === 1 ? "current" : "pending" },
-    { number: 2, title: "Contact", icon: <FaMapMarkerAlt />, status: currentStep > 2 ? "completed" : currentStep === 2 ? "current" : "pending" },
-    { number: 3, title: "Admin Details", icon: <FaUserTie />, status: currentStep > 3 ? "completed" : currentStep === 3 ? "current" : "pending" },
-    { number: 4, title: "Review", icon: <FaCheckCircle />, status: currentStep === 4 ? "current" : "pending" },
+    { number: 1, title: "School Info",    shortTitle: "School",  icon: School },
+    { number: 2, title: "Contact",        shortTitle: "Contact", icon: MapPin },
+    { number: 3, title: "Admin Details",  shortTitle: "Admin",   icon: UserCog },
+    { number: 4, title: "Review & Pay",   shortTitle: "Review",  icon: ClipboardCheck },
   ];
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 py-4 sm:py-8 px-3 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-4 sm:mb-8 animate-fadeIn">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-[#00468e] mb-1 sm:mb-2">
-            School Registration
-          </h1>
-          <p className="text-slate-600 text-xs sm:text-sm md:text-base">
-            Register your school with Schoolfee to ensure timely student fee collection
+  if (currentStep === 5) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 50%, #d1fae5 100%)" }}>
+        <div className="bg-white rounded-[10px] p-10 text-center max-w-md w-full border-2 border-green-200">
+          <div className="w-24 h-24 rounded-[10px] bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center mx-auto mb-6">
+            <CheckCircle2 className="text-white w-12 h-12" />
+          </div>
+          <div className="inline-flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-xs font-bold px-3 py-1.5 rounded-[10px] mb-4 uppercase tracking-wide">
+            <CheckCircle2 className="w-3.5 h-3.5" />Registration Submitted
+          </div>
+          <h2 className="text-2xl font-extrabold text-slate-800 mb-2">School Registration Complete!</h2>
+          <p className="text-slate-500 text-sm mb-2 leading-relaxed">
+            Payment of <strong>Rs.1111</strong> received. Confirmation sent to <strong>{formData.official_email}</strong>.
           </p>
+          <p className="text-xs text-slate-400 mb-8">We will review your application within 3-5 working days and contact you.</p>
+          <button onClick={() => router.push("/")} className="w-full py-3.5 rounded-[10px] font-bold text-sm text-white transition-all active:scale-95" style={{ background: "linear-gradient(135deg, #00305F, #00468E)" }}>
+            Back to Home
+          </button>
         </div>
+      </div>
+    );
+  }
 
-        <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 lg:gap-8">
-          {/* LEFT SIDEBAR - Progress Stepper (Desktop) */}
-          <div className="hidden lg:block lg:w-80 animate-slideInLeft">
-            <div className="bg-white rounded-2xl p-6 sticky top-8 border border-slate-200">
-              <div className="mb-6">
-                <div className="w-16 h-16 bg-[#F4951D] rounded-2xl flex items-center justify-center mb-4">
-                  <FaIdCard className="text-white text-2xl" />
-                </div>
-                <h2 className="text-xl font-bold text-slate-800">Registration Progress</h2>
-                <p className="text-sm text-slate-500 mt-1">Step {currentStep} of 4</p>
-              </div>
+  const progress = ((currentStep - 1) / (steps.length - 1)) * 100;
 
-              <div className="space-y-6">
-                {steps.map((step, index) => (
-                  <div key={step.number} className="relative">
-                    {/* Connecting Line */}
-                    {index < steps.length - 1 && (
-                      <div
-                        className={`absolute left-6 top-14 w-0.5 h-12 transition-all duration-500 ${
-                          step.status === "completed" ? "bg-[#0cab47]" : "bg-slate-200"
-                        }`}
-                      />
-                    )}
+  return (
+    <div className="min-h-screen" style={{ background: "linear-gradient(160deg, #F6F5F1 0%, #EEF4FB 50%, #F6F5F1 100%)" }}>
 
-                    <div className="flex items-start gap-4 relative z-10">
-                      {/* Step Icon */}
-                      <div
-                        className={`w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold transition-all duration-300 ${
-                          step.status === "completed"
-                            ? "bg-[#0cab47] text-white scale-100"
-                            : step.status === "current"
-                            ? "bg-[#00468e] text-white scale-110"
-                            : "bg-slate-200 text-slate-400 scale-95"
-                        }`}
-                      >
-                        {step.status === "completed" ? (
-                          <IoMdCheckmark className="text-2xl" />
-                        ) : (
-                          <span className="text-sm">{step.icon}</span>
-                        )}
-                      </div>
-
-                      {/* Step Content */}
-                      <div className="flex-1 pt-2">
-                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
-                          Step {step.number}
-                        </p>
-                        <p
-                          className={`text-sm font-bold mt-0.5 transition-colors ${
-                            step.status === "current"
-                              ? "text-[#00468e]"
-                              : step.status === "completed"
-                              ? "text-[#0cab47]"
-                              : "text-slate-400"
-                          }`}
-                        >
-                          {step.title}
-                        </p>
-                        {step.status === "current" && (
-                          <p className="text-xs text-slate-500 mt-1">In Progress</p>
-                        )}
-                        {step.status === "completed" && (
-                          <p className="text-xs text-[#0cab47] mt-1">Completed</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Help Section */}
-              <div className="mt-8 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
-                <p className="text-xs font-semibold text-slate-700 mb-2">Need Help?</p>
-                <button className="text-xs text-[#00468e] font-medium hover:underline transition">
-                  Contact Support →
-                </button>
-              </div>
-            </div>
+      {/* Hero Banner */}
+      <div className="relative overflow-hidden" style={{ background: "linear-gradient(135deg, #00305F 0%, #00468E 60%, #0058B4 100%)" }}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)", backgroundSize: "40px 40px" }} />
+        <div className="relative max-w-6xl mx-auto px-4 sm:px-6 py-6 md:py-10">
+          <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 text-white/80 text-xs font-semibold px-3 py-1.5 rounded-[10px] mb-4 uppercase tracking-widest">
+            <FaIdCard className="text-[#F4951D]" />School Registration
           </div>
-
-          {/* TOP PROGRESS BAR (Mobile/Tablet) */}
-          <div className="lg:hidden mb-3 sm:mb-4 animate-fadeIn">
-            <div className="bg-white rounded-lg sm:rounded-xl p-3 sm:p-4 border border-slate-200">
-              <div className="flex items-center justify-between mb-2 sm:mb-3">
-                {steps.map((step, index) => (
-                  <div key={step.number} className="flex-1 flex flex-col items-center">
-                    {/* Icon Circle */}
-                    <div
-                      className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 ${
-                        step.status === "completed"
-                          ? "bg-[#0cab47] text-white"
-                          : step.status === "current"
-                          ? "bg-[#00468e] text-white scale-110"
-                          : "bg-slate-200 text-slate-400"
-                      }`}
-                    >
-                      {step.status === "completed" ? (
-                        <IoMdCheckmark className="text-base sm:text-xl" />
-                      ) : (
-                        <span className="text-[10px] sm:text-xs">{step.icon}</span>
-                      )}
-                    </div>
-
-                    {/* Title */}
-                    <p
-                      className={`text-[9px] sm:text-[10px] md:text-xs font-semibold mt-1 sm:mt-2 text-center transition-colors ${
-                        step.status === "current"
-                          ? "text-[#00468e]"
-                          : step.status === "completed"
-                          ? "text-[#0cab47]"
-                          : "text-slate-400"
-                      }`}
-                    >
-                      {step.title}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              {/* Progress Bar */}
-              <div className="w-full bg-slate-200 rounded-full h-1.5 sm:h-2 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-[#00468e] to-[#0cab47] h-full rounded-full transition-all duration-500 ease-out"
-                  style={{ width: `${(currentStep / 4) * 100}%` }}
-                />
-              </div>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold text-white mb-2 leading-tight">
+            Register Your School with Schoolfee
+          </h1>
+          <p className="text-white/60 text-sm md:text-base max-w-xl">Ensure timely student fee collection and connect with thousands of families across India.</p>
+          {user && (
+            <div className="inline-flex items-center gap-2 mt-4 bg-green-500/20 border border-green-400/30 text-green-300 text-xs font-bold px-3 py-1.5 rounded-[10px]">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />Logged in as {user.fullName}
             </div>
-          </div>
-
-          {/* RIGHT SIDE - Form Content */}
-          <div className="flex-1 animate-slideInRight">
-            <div className="bg-white rounded-lg sm:rounded-2xl p-4 sm:p-6 md:p-8 border border-slate-200">
-              {/* STEP 1: SCHOOL BASIC INFORMATION */}
-              {currentStep === 1 && (
-                <div className="space-y-4 sm:space-y-6 animate-fadeIn">
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-[#00468e]">School Basic Information</h3>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                      Please provide your school's basic details
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      School Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="school_name"
-                      placeholder="Enter school name"
-                      value={formData.school_name}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    />
-                    {errors.school_name && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.school_name}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        School Type <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="school_type"
-                        value={formData.school_type}
-                        onChange={handleInputChange}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      >
-                        <option value="">Select School Type</option>
-                        {schoolTypes.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.school_type && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.school_type}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Established Year <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="established_year"
-                        placeholder="e.g., 1995"
-                        value={formData.established_year}
-                        onChange={handleInputChange}
-                        min="1800"
-                        max={new Date().getFullYear()}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.established_year && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.established_year}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Affiliation Board <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      name="affiliation_board"
-                      value={formData.affiliation_board}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    >
-                      <option value="">Select Affiliation Board</option>
-                      {affiliationBoards.map((board) => (
-                        <option key={board} value={board}>
-                          {board}
-                        </option>
-                      ))}
-                    </select>
-                    {errors.affiliation_board && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.affiliation_board}
-                      </p>
-                    )}
-                  </div>
-
-                  {formData.affiliation_board === "Other" && (
-                    <div className="space-y-2 animate-fadeIn">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Specify Affiliation Board <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="otherAffiliationBoard"
-                        placeholder="Please specify affiliation board"
-                        value={formData.otherAffiliationBoard}
-                        onChange={handleInputChange}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.otherAffiliationBoard && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.otherAffiliationBoard}
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Affiliation ID / Registration Number <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="affiliation_id"
-                      placeholder="Enter affiliation or registration number"
-                      value={formData.affiliation_id}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    />
-                    {errors.affiliation_id && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.affiliation_id}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 2: CONTACT & LOCATION */}
-              {currentStep === 2 && (
-                <div className="space-y-4 sm:space-y-6 animate-fadeIn">
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-[#00468e]">Contact & Location Details</h3>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                      School address and contact information
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      School Address <span className="text-red-500">*</span>
-                    </label>
-                    <textarea
-                      name="school_address"
-                      placeholder="Enter complete school address"
-                      rows={3}
-                      value={formData.school_address}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white resize-none"
-                    />
-                    {errors.school_address && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.school_address}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        City <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="city"
-                        placeholder="Enter city"
-                        value={formData.city}
-                        onChange={handleInputChange}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.city && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.city}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        State <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        name="state"
-                        value={formData.state}
-                        onChange={handleInputChange}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      >
-                        <option value="">Select State</option>
-                        {indianStates.map((state) => (
-                          <option key={state} value={state}>
-                            {state}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.state && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.state}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Pincode <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="pincode"
-                        placeholder="6-digit pincode"
-                        value={formData.pincode}
-                        onChange={handleInputChange}
-                        maxLength={6}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.pincode && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.pincode}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Contact Number <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="tel"
-                        name="contact_number"
-                        placeholder="10-digit contact number"
-                        value={formData.contact_number}
-                        onChange={handleInputChange}
-                        maxLength={10}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.contact_number && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.contact_number}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Alternate Contact
-                      </label>
-                      <input
-                        type="tel"
-                        name="alternate_contact"
-                        placeholder="10-digit alternate number"
-                        value={formData.alternate_contact}
-                        onChange={handleInputChange}
-                        maxLength={10}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.alternate_contact && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.alternate_contact}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Official Email Address <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      name="official_email"
-                      placeholder="school@example.com"
-                      value={formData.official_email}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    />
-                    {errors.official_email && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.official_email}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Website URL
-                    </label>
-                    <input
-                      type="url"
-                      name="website_url"
-                      placeholder="https://www.yourschool.com"
-                      value={formData.website_url}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    />
-                    {errors.website_url && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.website_url}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 3: ADMINISTRATIVE DETAILS */}
-              {currentStep === 3 && (
-                <div className="space-y-4 sm:space-y-6 animate-fadeIn">
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-[#00468e]">Administrative Details</h3>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                      Principal information and school statistics
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Principal Name <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      name="principal_name"
-                      placeholder="Enter principal's full name"
-                      value={formData.principal_name}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                    />
-                    {errors.principal_name && (
-                      <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                        ⚠ {errors.principal_name}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Principal Email <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="email"
-                        name="principal_email"
-                        placeholder="principal@example.com"
-                        value={formData.principal_email}
-                        onChange={handleInputChange}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.principal_email && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.principal_email}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Principal Contact <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="tel"
-                        name="principal_contact"
-                        placeholder="10-digit mobile number"
-                        value={formData.principal_contact}
-                        onChange={handleInputChange}
-                        maxLength={10}
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.principal_contact && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.principal_contact}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Total Number of Students <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="total_students"
-                        placeholder="Enter total students"
-                        value={formData.total_students}
-                        onChange={handleInputChange}
-                        min="1"
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.total_students && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.total_students}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                        Total Number of Teachers <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="number"
-                        name="total_teachers"
-                        placeholder="Enter total teachers"
-                        value={formData.total_teachers}
-                        onChange={handleInputChange}
-                        min="1"
-                        className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white"
-                      />
-                      {errors.total_teachers && (
-                        <p className="text-red-500 text-[10px] sm:text-xs mt-1 flex items-center gap-1">
-                          ⚠ {errors.total_teachers}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="block text-xs sm:text-sm font-semibold text-slate-700">
-                      Infrastructure & Facilities (Optional)
-                    </label>
-                    <textarea
-                      name="infrastructure_details"
-                      placeholder="Briefly describe your school's infrastructure, facilities, and amenities (e.g., library, computer lab, sports facilities, etc.)"
-                      rows={4}
-                      value={formData.infrastructure_details}
-                      onChange={handleInputChange}
-                      className="w-full px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#00468e] focus:border-transparent outline-none transition bg-slate-50 hover:bg-white resize-none"
-                    />
-                  </div>
-
-                  <div className="p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
-                    <p className="text-[10px] sm:text-xs text-slate-600 leading-relaxed">
-                      <strong className="text-[#00468e]">Note:</strong> All information will be verified during the onboarding process. Please ensure accuracy.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* STEP 4: REVIEW & SUBMIT */}
-              {currentStep === 4 && (
-                <div className="space-y-4 sm:space-y-6 animate-fadeIn">
-                  <div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-[#0cab47]">Review & Submit</h3>
-                    <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                      Please review all information before submitting
-                    </p>
-                  </div>
-
-                  {/* School Basic Information Summary */}
-                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-3 sm:p-5 rounded-lg sm:rounded-xl border-2 border-blue-200">
-                    <h4 className="font-bold text-base sm:text-lg text-[#00468e] mb-3 sm:mb-4 flex items-center gap-2">
-                      <FaSchool className="text-lg sm:text-xl" />
-                      School Basic Information
-                    </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          School Name
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.school_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          School Type
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.school_type}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Established Year
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.established_year}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Affiliation Board
-                        </p>
-                        <p className="text-slate-800 font-semibold">
-                          {formData.affiliation_board === "Other" ? formData.otherAffiliationBoard : formData.affiliation_board}
-                        </p>
-                      </div>
-                      <div className="sm:col-span-2">
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Affiliation ID
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.affiliation_id}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Contact & Location Summary */}
-                  <div className="bg-gradient-to-br from-purple-50 to-violet-50 p-3 sm:p-5 rounded-lg sm:rounded-xl border-2 border-purple-200">
-                    <h4 className="font-bold text-base sm:text-lg text-purple-700 mb-3 sm:mb-4 flex items-center gap-2">
-                      <FaMapMarkerAlt className="text-lg sm:text-xl" />
-                      Contact & Location Details
-                    </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
-                      <div className="sm:col-span-2">
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Address
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.school_address}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          City
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.city}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          State
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.state}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Pincode
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.pincode}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Contact Number
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.contact_number}</p>
-                      </div>
-                      {formData.alternate_contact && (
-                        <div>
-                          <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                            Alternate Contact
-                          </p>
-                          <p className="text-slate-800 font-semibold">{formData.alternate_contact}</p>
-                        </div>
-                      )}
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Official Email
-                        </p>
-                        <p className="text-slate-800 font-semibold break-all">{formData.official_email}</p>
-                      </div>
-                      {formData.website_url && (
-                        <div>
-                          <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                            Website
-                          </p>
-                          <p className="text-slate-800 font-semibold break-all">{formData.website_url}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Administrative Details Summary */}
-                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 p-3 sm:p-5 rounded-lg sm:rounded-xl border-2 border-green-200">
-                    <h4 className="font-bold text-base sm:text-lg text-[#0cab47] mb-3 sm:mb-4 flex items-center gap-2">
-                      <FaUserTie className="text-lg sm:text-xl" />
-                      Administrative Details
-                    </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Principal Name
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.principal_name}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Principal Email
-                        </p>
-                        <p className="text-slate-800 font-semibold break-all">{formData.principal_email}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Principal Contact
-                        </p>
-                        <p className="text-slate-800 font-semibold">{formData.principal_contact}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Total Students
-                        </p>
-                        <p className="text-slate-800 font-bold text-base sm:text-lg">{formData.total_students}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                          Total Teachers
-                        </p>
-                        <p className="text-slate-800 font-bold text-base sm:text-lg">{formData.total_teachers}</p>
-                      </div>
-                      {formData.infrastructure_details && (
-                        <div className="sm:col-span-2">
-                          <p className="text-slate-500 text-[10px] sm:text-xs font-semibold uppercase tracking-wide mb-1">
-                            Infrastructure Details
-                          </p>
-                          <p className="text-slate-800 font-semibold leading-relaxed">
-                            {formData.infrastructure_details}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Agreement Checkbox */}
-                  <div className="bg-slate-50 p-3 sm:p-5 rounded-lg sm:rounded-xl border-2 border-slate-300">
-                    <label className="flex items-start gap-2 sm:gap-3 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={agreed}
-                        onChange={(e) => setAgreed(e.target.checked)}
-                        className="mt-0.5 sm:mt-1 w-4 h-4 sm:w-5 sm:h-5 accent-[#00468e] cursor-pointer flex-shrink-0"
-                      />
-                      <span className="text-[10px] sm:text-sm text-slate-700 leading-relaxed group-hover:text-slate-900 transition">
-                        I confirm that all information provided is accurate and complete. I understand
-                        that Schoolfee will verify this information and may request additional
-                        documentation during the onboarding process. I agree to the{" "}
-                        <span className="text-[#00468e] font-semibold">Terms & Conditions</span> and{" "}
-                        <span className="text-[#00468e] font-semibold">Privacy Policy</span> of
-                        Schoolfee.
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {/* Navigation Buttons */}
-              <div className="flex flex-col sm:flex-row justify-between gap-2 sm:gap-3 mt-4 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-200">
-                <button
-                  onClick={handlePrevious}
-                  disabled={currentStep === 1}
-                  className={`px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base rounded-lg font-semibold transition-all duration-200 ${
-                    currentStep === 1
-                      ? "bg-slate-200 text-slate-400 cursor-not-allowed"
-                      : "bg-slate-500 text-white hover:bg-slate-600 active:scale-95"
-                  }`}
-                >
-                  ← Previous
-                </button>
-
-                {currentStep < 4 ? (
-                  <button
-                    onClick={handleNext}
-                    className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base bg-gradient-to-r from-[#00468e] to-[#0066b3] text-white rounded-lg font-semibold hover:from-[#003666] hover:to-[#00468e] transition-all duration-200 active:scale-95"
-                  >
-                    Continue →
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!agreed}
-                    className={`px-6 sm:px-8 py-2 sm:py-3 text-sm sm:text-base rounded-lg font-semibold transition-all duration-200 ${
-                      agreed
-                        ? "bg-gradient-to-r from-[#0cab47] to-[#08d451] text-white hover:from-[#0a9639] hover:to-[#0cab47] active:scale-95"
-                        : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                    }`}
-                  >
-                    {agreed ? "Submit Registration ✓" : "Submit Registration"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Custom Animations */}
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
 
-        @keyframes slideInLeft {
-          from {
-            opacity: 0;
-            transform: translateX(-30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
+        {/* Mobile Step Bar */}
+        <div className="lg:hidden mb-4">
+          <div className="bg-white rounded-[10px] p-5 border border-slate-200">
+            <div className="flex items-center justify-between relative mb-4">
+              {steps.map((step, i) => {
+                const done = currentStep > step.number;
+                const active = currentStep === step.number;
+                const Icon = step.icon;
+                return (
+                  <div key={step.number} className="flex-1 flex flex-col items-center relative">
+                    {i < steps.length - 1 && (
+                      <div className="absolute top-4 left-[calc(50%+18px)] right-0 h-0.5 transition-all duration-500" style={{ background: done ? "#0cab47" : "#e2e8f0" }} />
+                    )}
+                    <div className={`relative z-10 w-9 h-9 rounded-[10px] flex items-center justify-center text-xs font-bold transition-all duration-300 ${done ? "bg-[#0cab47] text-white" : active ? "text-white" : "bg-slate-100 text-slate-400"}`} style={active ? { background: "linear-gradient(135deg,#00468E,#0058B4)" } : {}}>
+                      {done ? <IoMdCheckmark className="text-base" /> : <Icon className="h-4 w-4" />}
+                    </div>
+                    <span className={`text-[10px] font-bold mt-2 text-center ${active ? "text-[#00468E]" : done ? "text-[#0cab47]" : "text-slate-400"}`}>{step.shortTitle}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${progress}%`, background: "linear-gradient(90deg, #00468E, #0cab47)" }} />
+            </div>
+          </div>
+        </div>
 
-        @keyframes slideInRight {
-          from {
-            opacity: 0;
-            transform: translateX(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
-        }
+        <div className="flex flex-col lg:flex-row gap-5">
 
-        .animate-fadeIn {
-          animation: fadeIn 0.5s ease-out;
-        }
+          {/* Desktop Sidebar */}
+          <div className="hidden lg:flex flex-col gap-4 w-72 flex-shrink-0">
+            <div className="sticky top-6 space-y-4">
 
-        .animate-slideInLeft {
-          animation: slideInLeft 0.6s ease-out;
-        }
+              <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden">
+                <div className="p-5 pb-4" style={{ background: "linear-gradient(135deg, #00305F, #00468E)" }}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-[10px] bg-[#F4951D] flex items-center justify-center flex-shrink-0">
+                      <FaIdCard className="text-white text-lg" />
+                    </div>
+                    <div>
+                      <p className="text-white font-bold text-sm">Registration Progress</p>
+                      <p className="text-white/60 text-xs">Step {Math.min(currentStep, 4)} of 4</p>
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-white/20 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-700 ease-out" style={{ width: `${progress}%`, background: "linear-gradient(90deg, #F4951D, #0cab47)" }} />
+                  </div>
+                </div>
 
-        .animate-slideInRight {
-          animation: slideInRight 0.6s ease-out;
-        }
-      `}</style>
+                <div className="p-4 space-y-1">
+                  {steps.map((step, i) => {
+                    const done = currentStep > step.number;
+                    const active = currentStep === step.number;
+                    const Icon = step.icon;
+                    return (
+                      <div key={step.number} className="relative">
+                        {i < steps.length - 1 && (
+                          <div className={`absolute left-[22px] top-[44px] w-0.5 h-8 transition-all duration-500 ${done ? "bg-[#0cab47]" : "bg-slate-200"}`} />
+                        )}
+                        <div className={`relative z-10 flex items-center gap-3 px-3 py-3 rounded-[10px] transition-all duration-200 ${active ? "bg-[#00468E]/[0.08] border border-[#00468E]/20" : ""}`}>
+                          <div className={`w-11 h-11 rounded-[10px] flex items-center justify-center flex-shrink-0 transition-all duration-300 ${done ? "bg-[#0cab47] text-white border border-green-600" : active ? "text-white border border-[#00305F]" : "bg-slate-100 text-slate-400 border border-slate-200"}`} style={active ? { background: "linear-gradient(135deg,#00468E,#0058B4)" } : {}}>
+                            {done ? <IoMdCheckmark className="text-lg" /> : <Icon className="h-4 w-4" />}
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Step {step.number}</p>
+                            <p className={`text-sm font-bold ${active ? "text-[#00468E]" : done ? "text-[#0cab47]" : "text-slate-400"}`}>{step.title}</p>
+                            {active && <p className="text-[11px] text-slate-400">In Progress</p>}
+                            {done && <p className="text-[11px] text-[#0cab47]">Completed</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-[10px] p-5 border-2 border-amber-300" style={{ background: "linear-gradient(135deg, #FFF8ED, #FFF3DC)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-1">Registration Fee</p>
+                <p className="text-3xl font-extrabold text-slate-800 mb-1">Rs.1111</p>
+                <div className="flex items-center gap-1.5 text-amber-700 text-xs"><FaLock className="text-[10px]" /><span>Secured by Razorpay</span></div>
+              </div>
+
+              <div className="bg-white rounded-[10px] border border-slate-200 p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <FaShieldAlt className="text-[#00468E] text-base" />
+                  <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Why Register</p>
+                </div>
+                <ul className="space-y-2.5">
+                  {["Verified school listing","Direct fee collection","Parent-school connect","Dedicated support team"].map(text => (
+                    <li key={text} className="flex items-center gap-2 text-xs text-slate-600">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-[#0cab47] shrink-0" />{text}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Form Panel */}
+          <div className="flex-1">
+            <div className="bg-white rounded-[10px] border border-slate-200 overflow-hidden">
+
+              {/* Form header */}
+              <div className="px-4 sm:px-6 py-3.5 border-b-2 border-slate-200" style={{ background: "linear-gradient(135deg, #f8fafc, #f1f5f9)" }}>
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-[10px] flex items-center justify-center flex-shrink-0 border border-[#00305F]" style={{ background: "linear-gradient(135deg, #00468E, #0058B4)" }}>
+                    {currentStep === 1 && <School className="text-white h-5 w-5" />}
+                    {currentStep === 2 && <MapPin className="text-white h-5 w-5" />}
+                    {currentStep === 3 && <UserCog className="text-white h-5 w-5" />}
+                    {currentStep === 4 && <ClipboardCheck className="text-white h-5 w-5" />}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Step {currentStep} of 4</p>
+                    <h2 className="text-base font-extrabold text-slate-800">
+                      {currentStep === 1 && "School Basic Information"}
+                      {currentStep === 2 && "Contact & Location Details"}
+                      {currentStep === 3 && "Administrative Details"}
+                      {currentStep === 4 && "Review & Pay"}
+                    </h2>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-4 sm:px-6 py-5">
+
+                {/* STEP 1 */}
+                {currentStep === 1 && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-500">Please provide your school's basic details and affiliation information.</p>
+
+                    <div><label className={lbl}>School Name <span className="text-red-500 normal-case">*</span></label><input type="text" name="school_name" placeholder="Enter school name" value={formData.school_name} onChange={handleInputChange} className={inp(errors.school_name)} />{errMsg(errors.school_name)}</div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className={lbl}>School Type <span className="text-red-500 normal-case">*</span></label>
+                        <select name="school_type" value={formData.school_type} onChange={handleInputChange} className={inp(errors.school_type)}>
+                          <option value="">Select School Type</option>
+                          {schoolTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        {errMsg(errors.school_type)}
+                      </div>
+                      <div><label className={lbl}>Established Year <span className="text-red-500 normal-case">*</span></label><input type="number" name="established_year" placeholder="e.g., 1995" value={formData.established_year} onChange={handleInputChange} min="1800" max={new Date().getFullYear()} className={inp(errors.established_year)} />{errMsg(errors.established_year)}</div>
+                    </div>
+
+                    <div>
+                      <label className={lbl}>Affiliation Board <span className="text-red-500 normal-case">*</span></label>
+                      <select name="affiliation_board" value={formData.affiliation_board} onChange={handleInputChange} className={inp(errors.affiliation_board)}>
+                        <option value="">Select Affiliation Board</option>
+                        {affiliationBoards.map(b => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                      {errMsg(errors.affiliation_board)}
+                    </div>
+
+                    {formData.affiliation_board === "Other" && (
+                      <div><label className={lbl}>Specify Affiliation Board <span className="text-red-500 normal-case">*</span></label><input type="text" name="otherAffiliationBoard" placeholder="Please specify affiliation board" value={formData.otherAffiliationBoard} onChange={handleInputChange} className={inp(errors.otherAffiliationBoard)} />{errMsg(errors.otherAffiliationBoard)}</div>
+                    )}
+
+                    <div><label className={lbl}>Affiliation ID / Registration Number <span className="text-red-500 normal-case">*</span></label><input type="text" name="affiliation_id" placeholder="Enter affiliation or registration number" value={formData.affiliation_id} onChange={handleInputChange} className={inp(errors.affiliation_id)} />{errMsg(errors.affiliation_id)}</div>
+                  </div>
+                )}
+
+                {/* STEP 2 */}
+                {currentStep === 2 && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-500">School address and official contact information.</p>
+
+                    <div><label className={lbl}>School Address <span className="text-red-500 normal-case">*</span></label><textarea name="school_address" placeholder="Enter complete school address" rows={2} value={formData.school_address} onChange={handleInputChange} className={`${inp(errors.school_address)} resize-none`} />{errMsg(errors.school_address)}</div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      <div><label className={lbl}>City <span className="text-red-500 normal-case">*</span></label><input type="text" name="city" placeholder="Enter city" value={formData.city} onChange={handleInputChange} className={inp(errors.city)} />{errMsg(errors.city)}</div>
+                      <div><label className={lbl}>State <span className="text-red-500 normal-case">*</span></label><select name="state" value={formData.state} onChange={handleInputChange} className={inp(errors.state)}><option value="">Select State</option>{indianStates.map(s => <option key={s} value={s}>{s}</option>)}</select>{errMsg(errors.state)}</div>
+                      <div><label className={lbl}>Pincode <span className="text-red-500 normal-case">*</span></label><input type="text" name="pincode" placeholder="6-digit pincode" value={formData.pincode} onChange={handleInputChange} maxLength={6} className={inp(errors.pincode)} />{errMsg(errors.pincode)}</div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div><label className={lbl}>Contact Number <span className="text-red-500 normal-case">*</span></label><input type="tel" name="contact_number" placeholder="10-digit contact number" value={formData.contact_number} onChange={handleInputChange} maxLength={10} className={inp(errors.contact_number)} />{errMsg(errors.contact_number)}</div>
+                      <div><label className={lbl}>Alternate Contact</label><input type="tel" name="alternate_contact" placeholder="10-digit alternate number" value={formData.alternate_contact} onChange={handleInputChange} maxLength={10} className={inp(errors.alternate_contact)} />{errMsg(errors.alternate_contact)}</div>
+                    </div>
+
+                    <div><label className={lbl}>Official Email Address <span className="text-red-500 normal-case">*</span></label><input type="email" name="official_email" placeholder="school@example.com" value={formData.official_email} onChange={handleInputChange} className={inp(errors.official_email)} />{errMsg(errors.official_email)}</div>
+
+                    <div><label className={lbl}>Website URL <span className="text-slate-400 normal-case font-normal">(optional)</span></label><input type="url" name="website_url" placeholder="https://www.yourschool.com" value={formData.website_url} onChange={handleInputChange} className={inp(errors.website_url)} />{errMsg(errors.website_url)}</div>
+                  </div>
+                )}
+
+                {/* STEP 3 */}
+                {currentStep === 3 && (
+                  <div className="space-y-4">
+                    <p className="text-sm text-slate-500">Principal information and school statistics.</p>
+
+                    <div><label className={lbl}>Principal Name <span className="text-red-500 normal-case">*</span></label><input type="text" name="principal_name" placeholder="Enter principal's full name" value={formData.principal_name} onChange={handleInputChange} className={inp(errors.principal_name)} />{errMsg(errors.principal_name)}</div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div><label className={lbl}>Principal Email <span className="text-red-500 normal-case">*</span></label><input type="email" name="principal_email" placeholder="principal@example.com" value={formData.principal_email} onChange={handleInputChange} className={inp(errors.principal_email)} />{errMsg(errors.principal_email)}</div>
+                      <div><label className={lbl}>Principal Contact <span className="text-red-500 normal-case">*</span></label><input type="tel" name="principal_contact" placeholder="10-digit mobile number" value={formData.principal_contact} onChange={handleInputChange} maxLength={10} className={inp(errors.principal_contact)} />{errMsg(errors.principal_contact)}</div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div><label className={lbl}>Total Students <span className="text-red-500 normal-case">*</span></label><input type="number" name="total_students" placeholder="Enter total students" value={formData.total_students} onChange={handleInputChange} min="1" className={inp(errors.total_students)} />{errMsg(errors.total_students)}</div>
+                      <div><label className={lbl}>Total Teachers <span className="text-red-500 normal-case">*</span></label><input type="number" name="total_teachers" placeholder="Enter total teachers" value={formData.total_teachers} onChange={handleInputChange} min="1" className={inp(errors.total_teachers)} />{errMsg(errors.total_teachers)}</div>
+                    </div>
+
+                    <div><label className={lbl}>Infrastructure & Facilities <span className="text-slate-400 normal-case font-normal">(optional)</span></label><textarea name="infrastructure_details" placeholder="Describe your school's infrastructure, facilities, and amenities..." rows={3} value={formData.infrastructure_details} onChange={handleInputChange} className={`${inp()} resize-none`} /></div>
+
+                    <div className="rounded-[10px] border border-blue-200 bg-blue-50 p-3.5 flex items-start gap-2.5">
+                      <AlertCircle className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                      <p className="text-xs text-slate-600 leading-relaxed"><strong className="text-blue-700">Note:</strong> All information will be verified during the onboarding process. Please ensure accuracy.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 4 */}
+                {currentStep === 4 && (
+                  <div className="space-y-3.5">
+                    <p className="text-sm text-slate-500">Please review all details carefully before completing your Rs.1111 registration payment.</p>
+
+                    <div className="rounded-[10px] overflow-hidden border-2 border-slate-200">
+                      <div className="flex items-center gap-3 px-4 py-2.5 border-b-2 border-slate-200" style={{ background: "linear-gradient(135deg,#f8fafc,#f1f5f9)" }}>
+                        <School className="text-[#00468E] h-4 w-4" /><span className="font-bold text-slate-700 text-sm">School Basic Information</span>
+                      </div>
+                      <div className="p-4 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {[
+                          ["School Name", formData.school_name],
+                          ["Type", formData.school_type],
+                          ["Established", formData.established_year],
+                          ["Board", formData.affiliation_board === "Other" ? formData.otherAffiliationBoard : formData.affiliation_board],
+                          ["Affiliation ID", formData.affiliation_id],
+                        ].map(([l,v]) => v ? (
+                          <div key={l} className="bg-slate-50 rounded-[8px] p-2.5 border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">{l}</p><p className="font-semibold text-slate-800 text-xs break-all">{v}</p></div>
+                        ) : null)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[10px] overflow-hidden border-2 border-slate-200">
+                      <div className="flex items-center gap-3 px-4 py-2.5 border-b-2 border-slate-200" style={{ background: "linear-gradient(135deg,#f0f4ff,#e8eeff)" }}>
+                        <MapPin className="text-[#00468E] h-4 w-4" /><span className="font-bold text-slate-700 text-sm">Contact & Location</span>
+                      </div>
+                      <div className="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {[
+                          ["City", formData.city],
+                          ["State", formData.state],
+                          ["Pincode", formData.pincode],
+                          ["Contact", formData.contact_number],
+                          ["Email", formData.official_email],
+                          ...(formData.website_url ? [["Website", formData.website_url]] : []),
+                        ].map(([l,v]) => v ? (
+                          <div key={l} className="bg-slate-50 rounded-[8px] p-2.5 border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">{l}</p><p className="font-semibold text-slate-800 text-xs break-all">{v}</p></div>
+                        ) : null)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[10px] overflow-hidden border-2 border-slate-200">
+                      <div className="flex items-center gap-3 px-4 py-2.5 border-b-2 border-slate-200" style={{ background: "linear-gradient(135deg,#f0fdf4,#dcfce7)" }}>
+                        <UserCog className="text-[#0cab47] h-4 w-4" /><span className="font-bold text-slate-700 text-sm">Administrative Details</span>
+                      </div>
+                      <div className="p-3 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {[
+                          ["Principal", formData.principal_name],
+                          ["Principal Email", formData.principal_email],
+                          ["Principal Contact", formData.principal_contact],
+                          ["Total Students", formData.total_students],
+                          ["Total Teachers", formData.total_teachers],
+                        ].map(([l,v]) => v ? (
+                          <div key={l} className="bg-slate-50 rounded-[8px] p-2.5 border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-0.5">{l}</p><p className="font-semibold text-slate-800 text-xs break-all">{v}</p></div>
+                        ) : null)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[10px] p-5 text-white relative border border-[#00305F]" style={{ background: "linear-gradient(135deg, #00305F 0%, #00468E 100%)" }}>
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div>
+                          <p className="text-blue-200 text-xs font-bold uppercase tracking-widest mb-1">Registration Fee</p>
+                          <p className="text-4xl font-extrabold">Rs.1111</p>
+                          <p className="text-blue-200 text-xs mt-1 flex items-center gap-1"><FaLock className="text-[10px]" />One-time · Secured by Razorpay</p>
+                        </div>
+                        <div className="bg-white/10 border border-white/20 rounded-[10px] px-4 py-3">
+                          <p className="text-blue-200 text-[11px] font-semibold mb-1">What you get:</p>
+                          <ul className="space-y-1">
+                            {["Verified school listing","Direct fee collection","Parent-school connect","Application review 3-5 days"].map(item => (
+                              <li key={item} className="flex items-center gap-1.5 text-[11px] text-white/80">
+                                <CheckCircle2 className="h-3 w-3 text-green-400 shrink-0" />{item}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+
+                    <label className="flex items-start gap-3.5 cursor-pointer p-4 rounded-[10px] border-2 transition-all duration-200 hover:border-[#00468E]/40" style={{ borderColor: agreed ? "#00468E" : "#cbd5e1", background: agreed ? "#00468E08" : "#f8fafc" }}>
+                      <div className={`w-5 h-5 rounded-[5px] border-2 flex items-center justify-center flex-shrink-0 mt-0.5 transition-all ${agreed ? "border-[#00468E] bg-[#00468E]" : "border-slate-300 bg-white"}`}>
+                        {agreed && <IoMdCheckmark className="text-white text-xs" />}
+                      </div>
+                      <input type="checkbox" checked={agreed} onChange={e => setAgreed(e.target.checked)} className="sr-only" />
+                      <span className="text-sm text-slate-600 leading-relaxed">I confirm that all information provided is accurate and complete. I agree to the <a href="/terms" className="text-[#00468E] font-semibold hover:underline">Terms & Conditions</a> and <a href="/privacy" className="text-[#00468E] font-semibold hover:underline">Privacy Policy</a> of Schoolfee.org.</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Nav Buttons */}
+                <div className="flex flex-col sm:flex-row justify-between gap-3 mt-5 pt-4 border-t-2 border-slate-200">
+                  <button onClick={handlePrevious} disabled={currentStep === 1} className={`px-6 py-3 rounded-[10px] font-bold text-sm transition-all duration-200 flex items-center gap-2 ${currentStep === 1 ? "bg-slate-100 text-slate-300 cursor-not-allowed border border-slate-200" : "bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 border border-slate-300"}`}>
+                    &larr; Previous
+                  </button>
+                  {currentStep < 4 ? (
+                    <button onClick={handleNext} className="px-8 py-3 rounded-[10px] font-bold text-sm text-white transition-all active:scale-95 border border-[#00305F] flex items-center gap-2" style={{ background: "linear-gradient(135deg, #00468E, #0058B4)" }}>
+                      Continue <ChevronRight className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button onClick={handlePaymentAndSubmit} disabled={!agreed || isPaymentProcessing || isSubmitting}
+                      className={`px-8 py-3 rounded-[10px] font-bold text-sm transition-all flex items-center gap-2 ${agreed && !isPaymentProcessing && !isSubmitting ? "text-white active:scale-95 border border-green-700" : "bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300"}`}
+                      style={agreed && !isPaymentProcessing && !isSubmitting ? { background: "linear-gradient(135deg, #0cab47, #08d451)" } : {}}>
+                      {isPaymentProcessing ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Processing...</> :
+                       isSubmitting ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving...</> :
+                       <><FaLock className="text-xs" />Pay Rs.1111 &amp; Submit Registration</>}
+                    </button>
+                  )}
+                </div>
+
+              </div>
+            </div>
+
+            {/* Mobile trust bar */}
+            <div className="lg:hidden mt-4 bg-white rounded-[10px] border border-slate-200 p-4">
+              <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+                {["Verified Listing","Fee Collection","Parent Connect","Dedicated Support"].map(item => (
+                  <span key={item} className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-[#0cab47] shrink-0" />{item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

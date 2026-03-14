@@ -3,58 +3,71 @@ import { db } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
-    const sessionToken = request.cookies.get("dashboard_session")?.value;
-    if (!sessionToken) {
-      return NextResponse.json({ success: false, error: "Not authenticated" }, { status: 401 });
-    }
-
-    const [callerRows]: any = await db.execute(
-      `SELECT u.role FROM dashboard_users u
-       INNER JOIN dashboard_user_sessions s ON s.user_id = u.id
-       WHERE s.session_token = ? AND s.expires_at > NOW() AND u.status = 'active'`,
-      [sessionToken]
-    );
-
-    if (callerRows.length === 0) {
-      return NextResponse.json({ success: false, error: "Session expired" }, { status: 401 });
-    }
-
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || "";
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "20");
     const offset = (page - 1) * limit;
 
-    const conditions: string[] = [];
-    const params: any[] = [];
+    const hasSearch = search.trim().length > 0;
+    const searchValues = hasSearch ? [`%${search}%`, `%${search}%`] : [];
 
-    if (search) {
-      conditions.push("(full_name LIKE ? OR email LIKE ? OR phone LIKE ?)");
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-    }
+    const whereClause = hasSearch
+      ? `WHERE (full_name LIKE ? OR email LIKE ?)`
+      : "";
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
+    // Total count
     const [countRows]: any = await db.execute(
       `SELECT COUNT(*) as total FROM public_users ${whereClause}`,
-      params
+      searchValues
     );
-    const total = countRows[0].total;
+    const total = countRows[0]?.total ?? 0;
 
+    // Active count — is_active = 1
+    const activeWhere = hasSearch
+      ? `WHERE is_active = 1 AND (full_name LIKE ? OR email LIKE ?)`
+      : `WHERE is_active = 1`;
+
+    const [activeRows]: any = await db.execute(
+      `SELECT COUNT(*) as active_count FROM public_users ${activeWhere}`,
+      searchValues
+    );
+    const activeCount = activeRows[0]?.active_count ?? 0;
+
+    // Users — exact columns from public_users table (no phone, no last_login, no status)
     const [rows]: any = await db.execute(
-      `SELECT id, full_name, email, phone, status, created_at, last_login
-       FROM public_users ${whereClause}
-       ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      `SELECT id, full_name, email, created_at, updated_at, is_active
+       FROM public_users
+       ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...searchValues, limit, offset]
     );
 
     return NextResponse.json({
       success: true,
       users: rows,
-      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+      stats: {
+        total,
+        active: activeCount,
+        pageCount: rows.length,
+      },
     });
   } catch (error: any) {
     console.error("Public users fetch error:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      {
+        success: false,
+        error: error?.message || "Failed to fetch users",
+        code: error?.code || "UNKNOWN",
+      },
+      { status: 500 }
+    );
   }
 }

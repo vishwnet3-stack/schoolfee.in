@@ -554,7 +554,7 @@ export default function TeacherSupportPage() {
                 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-6">
                   <Link
-                    href="/teacher-support/apply"
+                    href="/registration/teacher/"
                     className="w-full sm:w-auto inline-flex items-center justify-center px-7 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 hover:shadow-lg transform hover:-translate-y-0.5 transition-all duration-200 text-base"
                   >
                     Start Your Application

@@ -53,27 +53,60 @@ export const navItems = [
     icon: School,
     children: [
       { label: "All Schools", href: "/dashboard/super-admin/schools" },
-      { label: "School Profiles", href: "/dashboard/super-admin/schools/profiles" },
-      { label: "Fee Structure", href: "/dashboard/super-admin/schools/fee-structure" },
-      { label: "Enrollments", href: "/dashboard/super-admin/schools/enrollments" },
+      {
+        label: "School Profiles",
+        href: "/dashboard/super-admin/schools/profiles",
+      },
+      {
+        label: "Fee Structure",
+        href: "/dashboard/super-admin/schools/fee-structure",
+      },
+      {
+        label: "Enrollments",
+        href: "/dashboard/super-admin/schools/enrollments",
+      },
+      {
+        label: "Submit Application",
+        href: "/dashboard/super-admin/schools/school-applications",
+      },
     ],
   },
   {
     label: "Parents",
     icon: UserCheck,
     children: [
+      {
+        label: "Submit Application",
+        href: "/dashboard/super-admin/parents/parent-applications",
+      },
       { label: "All Parents", href: "/dashboard/super-admin/parents" },
-      { label: "Payment History", href: "/dashboard/super-admin/parents/payment-history" },
-      { label: "Pending Dues", href: "/dashboard/super-admin/parents/pending-dues" },
+      {
+        label: "Payment History",
+        href: "/dashboard/super-admin/parents/payment-history",
+      },
+      {
+        label: "Pending Dues",
+        href: "/dashboard/super-admin/parents/pending-dues",
+      },
     ],
   },
   {
     label: "Teachers",
     icon: GraduationCap,
     children: [
+      {
+        label: "Submit Application",
+        href: "/dashboard/super-admin/teachers/teacher-applications",
+      },
       { label: "All Teachers", href: "/dashboard/super-admin/teachers" },
-      { label: "Assignments", href: "/dashboard/super-admin/teachers/assignments" },
-      { label: "Performance", href: "/dashboard/super-admin/teachers/performance" },
+      {
+        label: "Assignments",
+        href: "/dashboard/super-admin/teachers/assignments",
+      },
+      {
+        label: "Performance",
+        href: "/dashboard/super-admin/teachers/performance",
+      },
     ],
   },
   {
