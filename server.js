@@ -1,4 +1,4 @@
-// D:\Backend\server.js
+// D:\Backend\server.js New server.js file
 require('dotenv').config(); // Loads environment variables from .env file
 const cli = require('next/dist/cli/next-start');
 cli.nextStart({
