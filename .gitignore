@@ -76,3 +76,9 @@ docker-compose.override.yml
 # misc
 *.pem
 *.key
+
+# private uploads
+/private-uploads/
+
+# public files
+/public/
