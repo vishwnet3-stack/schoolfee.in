@@ -11,6 +11,14 @@ const EXCLUDE_PAGES = new Set([
   'profile',
   'digilocker-callback',
   'not-found',
+  'beyond-school',
+  'digilocker-parent-callback',
+  'digilocker-teacher-callback',
+  'funding',
+  'impact',
+  'story', 
+  'story/impact',
+  'story/mission',
 ])
 
 function discoverPages(websiteDir: string): string[] {
