@@ -2,10 +2,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import Razorpay from "razorpay";
 
-// ── Your Razorpay TEST credentials (key + secret MUST match) ──────────────
+// ── Razorpay credentials loaded from .env ─────────────────────────────────
+// To switch test ↔ live, only change RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in .env
 const razorpay = new Razorpay({
-  key_id:     "rzp_test_SNWMyYGGnFaJ0I",   // ✅ Your Test Key ID
-  key_secret: "tJgfeUFLJvJtAlbSj4apzx2l",  // ✅ Your Test Key Secret
+  key_id:     process.env.RAZORPAY_KEY_ID!,
+  key_secret: process.env.RAZORPAY_KEY_SECRET!,
 });
 
 export async function POST(request: NextRequest) {

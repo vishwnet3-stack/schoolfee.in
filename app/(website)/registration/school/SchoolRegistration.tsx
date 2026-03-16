@@ -12,7 +12,8 @@ import {
 } from "lucide-react";
 
 declare global { interface Window { Razorpay: any; } }
-const RAZORPAY_KEY_ID = "rzp_test_SNWMyYGGnFaJ0I";
+// ── Key loaded from .env — change only NEXT_PUBLIC_RAZORPAY_KEY_ID in .env
+const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!;
 
 const indianStates = [
   "Andaman and Nicobar Islands","Andhra Pradesh","Arunachal Pradesh","Assam","Bihar",

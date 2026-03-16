@@ -14,7 +14,7 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import Link from "next/link";
-import { useAdminAuth } from "../AdminAuthContext";
+import { useAdminAuth } from "../Adminauthcontext";
 
 const monthlyData = [
   { month: "Nov", received: 285000, pending: 35000 },

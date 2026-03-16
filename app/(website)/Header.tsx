@@ -329,7 +329,7 @@ export default function Header() {
                   className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-[#00468E] text-[#00468E] hover:bg-[#00468E] hover:text-white rounded-md transition-colors whitespace-nowrap"
                 >
                   <UserPlus className="mr-1 h-3 w-3" />
-                  Join
+                  Join Membership
                   <ChevronDown className={`ml-1 h-3 w-3 transition-transform ${isMobileRegDropdownOpen ? "rotate-180" : ""}`} />
                 </button>
 

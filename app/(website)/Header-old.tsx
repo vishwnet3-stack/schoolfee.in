@@ -215,25 +215,42 @@ export default function Header() {
               <div className="flex items-center gap-3">
                 <img src="/images/chm-circle-logo.jpeg" alt="CHM Logo" className="h-14 w-auto" />
 
-                {/* Hidden: login/register dropdown (kept for future re-enable) */}
-                {/* <div className="hidden lg:block"><UserProfileDropdown /></div> */}
+                {/* Desktop — User Profile */}
+                <div className="hidden">
+                  <UserProfileDropdown />
+                </div>
 
-                {/* Desktop — Join Waitlist (replaces "Become A Member") */}
+                {/* Desktop — Join Waitlist button */}
+                <Link
+                  href="/join-waitlist"
+                  className="hidden lg:inline-flex items-center justify-center px-4 h-10 bg-gradient-to-r from-[#F4951D] to-[#e07d0a] hover:from-[#e07d0a] hover:to-[#c96f00] text-white shadow-md hover:shadow-lg transition-all rounded-md font-medium text-sm whitespace-nowrap"
+                >
+                  <UserPlus className="mr-2 h-4 w-4" />
+                  Join Waitlist
+                </Link>
+
+                {/* Desktop — Become A Member (original, restored) */}
                 <div className="hidden lg:block relative" ref={desktopDropdownRef}>
-                  <Link
-                    href="/join-waitlist"
+                  <button
+                    onClick={() => setIsDesktopRegDropdownOpen(!isDesktopRegDropdownOpen)}
                     className="inline-flex items-center justify-center px-4 h-10 bg-gradient-to-r from-[#00468E] to-[#0066CC] hover:from-[#003a75] hover:to-[#0052a3] text-white shadow-md hover:shadow-lg transition-all rounded-md font-medium text-sm whitespace-nowrap"
                   >
                     <UserPlus className="mr-2 h-4 w-4" />
-                    Join Waitlist
-                  </Link>
-                  {/* Hidden: old registration dropdown (kept for future re-enable) */}
-                  {false && isDesktopRegDropdownOpen && (
+                    Become A Member
+                    <ChevronDown className={`ml-2 h-4 w-4 transition-transform duration-200 ${isDesktopRegDropdownOpen ? "rotate-180" : ""}`} />
+                  </button>
+
+                  {isDesktopRegDropdownOpen && (
                     <div className="absolute right-0 mt-2 w-60 bg-white rounded-md shadow-lg border border-gray-200 py-3 z-50">
                       {registrationOptions.map((option, i) => {
                         const Icon = option.icon;
                         return (
-                          <Link key={i} href={option.href} className="flex items-start gap-3 px-4 py-2 hover:bg-gray-50 transition-colors" onClick={() => setIsDesktopRegDropdownOpen(false)}>
+                          <Link
+                            key={i}
+                            href={option.href}
+                            className="flex items-start gap-3 px-4 py-2 hover:bg-gray-50 transition-colors"
+                            onClick={() => setIsDesktopRegDropdownOpen(false)}
+                          >
                             <Icon className="h-4 w-4 mt-0.5 text-[#00468E] flex-shrink-0" />
                             <div className="flex flex-col">
                               <span className="font-medium text-gray-900 text-sm">{option.label}</span>
@@ -291,24 +308,42 @@ export default function Header() {
 
             {/* Mobile top row */}
             <div className="lg:hidden flex items-center justify-between h-12 gap-2">
-              {/* Hidden: login/register — kept for future re-enable */}
-              {/* <div className="flex-1 min-w-0"><UserProfileDropdown /></div> */}
+              {/* <div className="flex-1 min-w-0"> */}
+              <div className="hidden">
+                <UserProfileDropdown />
+              </div>
 
+              {/* Mobile — Join Waitlist */}
+              <Link
+                href="/join-waitlist"
+                className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-[#F4951D] text-[#F4951D] hover:bg-[#F4951D] hover:text-white rounded-md transition-colors whitespace-nowrap"
+              >
+                <UserPlus className="mr-1 h-3 w-3" />
+                Waitlist
+              </Link>
+
+              {/* Mobile — Become A Member (original, restored) */}
               <div className="relative" ref={mobileDropdownRef}>
-                <Link
-                  href="/join-waitlist"
+                <button
+                  onClick={() => setIsMobileRegDropdownOpen(!isMobileRegDropdownOpen)}
                   className="inline-flex items-center px-3 py-1.5 text-xs font-medium border border-[#00468E] text-[#00468E] hover:bg-[#00468E] hover:text-white rounded-md transition-colors whitespace-nowrap"
                 >
                   <UserPlus className="mr-1 h-3 w-3" />
-                  Join Waitlist
-                </Link>
-                {/* Hidden: old mobile registration dropdown (kept for future re-enable) */}
-                {false && isMobileRegDropdownOpen && (
+                  Join
+                  <ChevronDown className={`ml-1 h-3 w-3 transition-transform ${isMobileRegDropdownOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {isMobileRegDropdownOpen && (
                   <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 py-1 z-50">
                     {registrationOptions.map((option, i) => {
                       const Icon = option.icon;
                       return (
-                        <Link key={i} href={option.href} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors" onClick={() => setIsMobileRegDropdownOpen(false)}>
+                        <Link
+                          key={i}
+                          href={option.href}
+                          className="flex items-center gap-2 px-4 py-2 hover:bg-gray-50 transition-colors"
+                          onClick={() => setIsMobileRegDropdownOpen(false)}
+                        >
                           <Icon className="h-4 w-4 text-[#00468E] flex-shrink-0" />
                           <span className="text-sm text-gray-900">{option.label}</span>
                         </Link>

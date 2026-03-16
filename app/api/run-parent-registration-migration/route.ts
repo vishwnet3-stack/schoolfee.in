@@ -9,12 +9,12 @@ export async function GET() {
         id              INT AUTO_INCREMENT PRIMARY KEY,
         public_user_id  INT NULL,
         first_name      VARCHAR(100) NOT NULL,
-        last_name       VARCHAR(100) NOT NULL,
+        last_name       VARCHAR(100) NOT NULL DEFAULT '',
         email           VARCHAR(200) NOT NULL,
         phone           VARCHAR(15)  NOT NULL,
-        pan_number      VARCHAR(10)  NOT NULL,
+        pan_number      VARCHAR(10)  NULL,
         address         TEXT         NOT NULL,
-        city            VARCHAR(100) NOT NULL,
+        city            VARCHAR(100) NOT NULL DEFAULT '',
         state           VARCHAR(100) NOT NULL,
         fee_amount      DECIMAL(12,2) NOT NULL,
         fee_period      ENUM('monthly','quarterly','halfYearly','annual') NOT NULL,
@@ -49,15 +49,15 @@ export async function GET() {
         school_name      VARCHAR(200) NOT NULL,
         school_city      VARCHAR(100) NOT NULL,
         apaar_id         VARCHAR(50)  NULL,
-        -- DigiLocker verification fields
         digilocker_client_id  VARCHAR(200) NULL,
         digilocker_verified   TINYINT(1)   DEFAULT 0,
         digilocker_full_name  VARCHAR(200) NULL,
         doc_gender            VARCHAR(10)  NULL,
         doc_dob               VARCHAR(20)  NULL,
-        -- APAAR document storage (admin-only, stored server-side)
-        apaar_doc_path   VARCHAR(500) NULL COMMENT 'Relative path in private-uploads/apaar/',
-        apaar_doc_url    TEXT         NULL COMMENT 'Original S3 URL from DigiLocker (may expire)',
+        apaar_doc_path   VARCHAR(500) NULL,
+        apaar_doc_url    TEXT         NULL,
+        apaar_id_number  VARCHAR(50)  NULL,
+        apaar_doc_local_path VARCHAR(500) NULL,
         created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_registration (registration_id),
         INDEX idx_apaar_id (apaar_id),
@@ -65,30 +65,38 @@ export async function GET() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
-    // ── Alter existing table: add new APAAR/DigiLocker columns if missing ──
-    const alterColumns = [
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_client_id VARCHAR(200) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_verified TINYINT(1) DEFAULT 0",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_full_name VARCHAR(200) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS doc_gender VARCHAR(10) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS doc_dob VARCHAR(20) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_path VARCHAR(500) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_url TEXT NULL",
-      // These are also used by razorpay-verify INSERT
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_id_number VARCHAR(50) NULL",
-      "ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_local_path VARCHAR(500) NULL",
+    // Alter existing live tables to fix NOT NULL constraints
+    const alterStmts = [
+      `ALTER TABLE parent_registrations MODIFY COLUMN pan_number VARCHAR(10) NULL`,
+      `ALTER TABLE parent_registrations MODIFY COLUMN city VARCHAR(100) NOT NULL DEFAULT ''`,
+      `ALTER TABLE parent_registrations MODIFY COLUMN last_name VARCHAR(100) NOT NULL DEFAULT ''`,
+      `ALTER TABLE parent_registrations ADD COLUMN IF NOT EXISTS digilocker_client_id VARCHAR(200) NULL`,
+      `ALTER TABLE parent_registrations ADD COLUMN IF NOT EXISTS masked_aadhaar VARCHAR(20) NULL`,
+      `ALTER TABLE parent_registrations ADD COLUMN IF NOT EXISTS aadhaar_local_pdf VARCHAR(500) NULL`,
+      `ALTER TABLE parent_registrations ADD COLUMN IF NOT EXISTS digilocker_verified_at DATETIME NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_id_number VARCHAR(50) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_local_path VARCHAR(500) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_client_id VARCHAR(200) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_verified TINYINT(1) DEFAULT 0`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS digilocker_full_name VARCHAR(200) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS doc_gender VARCHAR(10) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS doc_dob VARCHAR(20) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_path VARCHAR(500) NULL`,
+      `ALTER TABLE parent_registration_children ADD COLUMN IF NOT EXISTS apaar_doc_url TEXT NULL`,
     ];
-    for (const sql of alterColumns) {
-      try { await db.execute(sql); } catch (e: any) {
-        // Ignore "Duplicate column" errors on fresh installs
-        if (!e.message?.includes("Duplicate column")) console.warn("ALTER warn:", e.message);
+    const results: string[] = [];
+    for (const sql of alterStmts) {
+      try {
+        await db.execute(sql);
+        results.push("OK: " + sql.slice(0, 60));
+      } catch (e: any) {
+        if (!e.message?.includes("Duplicate column")) {
+          results.push("WARN: " + e.message);
+        }
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: "parent_registrations + parent_registration_children tables created/updated with APAAR doc storage.",
-    });
+    return NextResponse.json({ success: true, message: "Tables created/updated.", results });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -5,23 +5,16 @@ import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/mailer";
 
 // ── Secret loaded from .env — change only .env to switch test ↔ live
-const RAZORPAY_KEY_SECRET  = process.env.RAZORPAY_KEY_SECRET!;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET!;
 const TEACHER_DASHBOARD_URL = "https://schoolfee.in/dashboard/admin/login";
 
 function verifySignature(orderId: string, paymentId: string, signature: string): boolean {
   const body     = `${orderId}|${paymentId}`;
-  const expected = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET).update(body).digest("hex");
+  const expected = crypto
+    .createHmac("sha256", RAZORPAY_KEY_SECRET)
+    .update(body)
+    .digest("hex");
   return expected === signature;
-}
-
-function str(val: any, fallback = ""): string {
-  if (val === null || val === undefined) return fallback;
-  const s = String(val).trim();
-  return s.length > 0 ? s : fallback;
-}
-function strOrNull(val: any): string | null {
-  const s = str(val);
-  return s.length > 0 ? s : null;
 }
 
 export async function POST(request: NextRequest) {
@@ -42,14 +35,18 @@ export async function POST(request: NextRequest) {
 
     // 1. Verify Razorpay signature
     if (!verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
-      return NextResponse.json({ success: false, error: "Payment verification failed" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Payment verification failed" },
+        { status: 400 }
+      );
     }
 
-    const normalizedEmail = str(formData.email).toLowerCase();
+    // 1b. Duplicate email check across all registration tables
+    const normalizedEmail = (formData.email || "").toLowerCase().trim();
 
-    // 2. Duplicate email check across all registration tables
     const [existingTeacher]: any = await db.execute(
-      `SELECT id FROM teacher_registrations WHERE email = ? LIMIT 1`, [normalizedEmail]
+      `SELECT id FROM teacher_registrations WHERE email = ? LIMIT 1`,
+      [normalizedEmail]
     );
     if (existingTeacher.length > 0) {
       return NextResponse.json(
@@ -57,8 +54,10 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+
     const [existingParent]: any = await db.execute(
-      `SELECT id FROM parent_registrations WHERE email = ? LIMIT 1`, [normalizedEmail]
+      `SELECT id FROM parent_registrations WHERE email = ? LIMIT 1`,
+      [normalizedEmail]
     );
     if (existingParent.length > 0) {
       return NextResponse.json(
@@ -66,6 +65,8 @@ export async function POST(request: NextRequest) {
         { status: 409 }
       );
     }
+
+    // school_registrations uses official_email / principal_email — not a generic "email" column
     const [existingSchool]: any = await db.execute(
       `SELECT id FROM school_registrations WHERE official_email = ? OR principal_email = ? LIMIT 1`,
       [normalizedEmail, normalizedEmail]
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Save teacher registration — every field null-safe
+    // 2. Save teacher registration
     const [result]: any = await db.execute(
       `INSERT INTO teacher_registrations (
         public_user_id,
@@ -90,88 +91,101 @@ export async function POST(request: NextRequest) {
         aadhaar_local_pdf, pan_local_pdf
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
-        publicUserId          || null,
-        str(formData.full_name),
-        str(formData.dob),
-        str(formData.gender),
-        str(formData.phone),
+        publicUserId || null,
+        formData.full_name,
+        formData.dob,
+        formData.gender,
+        formData.phone,
         normalizedEmail,
-        str(formData.address),
-        str(formData.state),
-        strOrNull(formData.pincode),
-        strOrNull(formData.father_name),
-        str(formData.qualification),
-        strOrNull(formData.otherQualification),
-        str(formData.subject),
-        strOrNull(formData.otherSubject),
-        str(formData.experience),
-        str(formData.school_name),
-        str(formData.employee_id),
-        parseFloat(formData.salary_monthly) || 0,
-        str(formData.joining_date),
-        str(formData.employment_type),
+        formData.address,
+        formData.state,
+        formData.pincode || null,
+        formData.father_name || null,
+        formData.qualification,
+        formData.otherQualification || null,
+        formData.subject,
+        formData.otherSubject || null,
+        formData.experience,
+        formData.school_name,
+        formData.employee_id,
+        parseFloat(formData.salary_monthly),
+        formData.joining_date,
+        formData.employment_type,
         razorpay_order_id,
         razorpay_payment_id,
-        "paid", 111.00, "pending",
-        strOrNull(digilockerClientId),
-        strOrNull(maskedAadhaar),
-        strOrNull(panNumber),
-        strOrNull(aadhaarLocalPdf),
-        strOrNull(panLocalPdf),
+        "paid",
+        111.00,
+        "pending",
+        digilockerClientId  || null,
+        maskedAadhaar       || null,
+        panNumber           || null,
+        aadhaarLocalPdf     || null,
+        panLocalPdf         || null,
       ]
     );
 
     const registrationId = result.insertId;
 
-    // 4. Link digilocker session
+    // 3. Link digilocker_session to this registration
     if (digilockerClientId) {
       try {
         await db.execute(
           `UPDATE digilocker_sessions SET teacher_registration_id = ?, session_type = 'teacher', updated_at = NOW() WHERE client_id = ?`,
           [registrationId, digilockerClientId]
         );
-      } catch (e) { console.warn("Could not link digilocker session:", e); }
+      } catch (e) {
+        console.warn("Could not link digilocker session:", e);
+      }
     }
 
-    const subjectLabel = str(formData.subject) === "Other"
-      ? str(formData.otherSubject, "Other")
-      : str(formData.subject);
-    const qualLabel = str(formData.qualification) === "Other"
-      ? str(formData.otherQualification, "Other")
-      : str(formData.qualification);
-
-    // 5. Confirmation email to teacher
+    // 4. Registration confirmation email to teacher
     try {
       await sendEmail(normalizedEmail, "teacherRegistrationConfirmation", {
-        name: formData.full_name, registrationId,
-        paymentId: razorpay_payment_id, school: formData.school_name,
-        subject: subjectLabel, qualification: qualLabel,
-        experience: formData.experience,
+        name:           formData.full_name,
+        registrationId,
+        paymentId:      razorpay_payment_id,
+        school:         formData.school_name,
+        subject:        formData.subject === "Other" ? formData.otherSubject : formData.subject,
+        qualification:  formData.qualification === "Other" ? formData.otherQualification : formData.qualification,
+        experience:     formData.experience,
       });
     } catch (e) { console.error("Teacher confirmation email failed (non-fatal):", e); }
 
-    // 6. Dashboard access email
+    // 5. Dashboard access email to teacher
     try {
       await sendEmail(normalizedEmail, "teacherDashboardAccess", {
-        name: formData.full_name, registrationId,
-        dashboardUrl: TEACHER_DASHBOARD_URL, email: normalizedEmail,
+        name:           formData.full_name,
+        registrationId,
+        dashboardUrl:   TEACHER_DASHBOARD_URL,
+        email:          normalizedEmail,
       });
     } catch (e) { console.error("Teacher dashboard access email failed (non-fatal):", e); }
 
-    // 7. Admin alert
+    // 6. Admin alert
     try {
       await sendEmail("vishwnet.schoolfee@gmail.com", "teacherRegistrationAdminAlert", {
-        name: formData.full_name, email: normalizedEmail,
-        phone: formData.phone, registrationId,
-        paymentId: razorpay_payment_id, school: formData.school_name,
-        state: formData.state, subject: subjectLabel,
+        name:           formData.full_name,
+        email:          normalizedEmail,
+        phone:          formData.phone,
+        registrationId,
+        paymentId:      razorpay_payment_id,
+        school:         formData.school_name,
+        state:          formData.state,
+        subject:        formData.subject === "Other" ? formData.otherSubject : formData.subject,
         employmentType: formData.employment_type,
       });
     } catch (e) { console.error("Admin email failed (non-fatal):", e); }
 
-    return NextResponse.json({ success: true, registrationId, message: "Teacher registration submitted successfully" });
+    return NextResponse.json({
+      success: true,
+      registrationId,
+      message: "Teacher registration submitted successfully",
+    });
   } catch (error: any) {
     console.error("Teacher verify/save error:", error);
-    return NextResponse.json({ success: false, error: error?.message || "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error?.message || "Server error" },
+      { status: 500 }
+    );
   }
 }

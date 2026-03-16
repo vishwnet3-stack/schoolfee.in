@@ -6,8 +6,8 @@ import fs from "fs";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/mailer";
 
-// ── Must match key_secret in razorpay-order/route.ts ──────────────────────
-const RAZORPAY_KEY_SECRET = "tJgfeUFLJvJtAlbSj4apzx2l";  // ✅ Your Test Secret
+// ── Secret loaded from .env — change only .env to switch test ↔ live
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET!;
 
 function verifySignature(orderId: string, paymentId: string, signature: string): boolean {
   const body     = `${orderId}|${paymentId}`;
@@ -15,12 +15,20 @@ function verifySignature(orderId: string, paymentId: string, signature: string):
   return expected === signature;
 }
 
-/**
- * Downloads a PDF from a remote URL and saves it to the server's
- * private uploads directory. Returns the relative path for DB storage.
- * The file is NOT served publicly — only admins can access it via
- * /api/dashboard/apaar-doc?file=...
- */
+/** Safely coerce any value to a non-empty string, or return the fallback */
+function str(val: any, fallback = ""): string {
+  if (val === null || val === undefined) return fallback;
+  const s = String(val).trim();
+  return s.length > 0 ? s : fallback;
+}
+
+/** Safely coerce to string | null */
+function strOrNull(val: any): string | null {
+  if (val === null || val === undefined) return null;
+  const s = String(val).trim();
+  return s.length > 0 ? s : null;
+}
+
 async function downloadAndSaveApaarPdf(
   pdfUrl: string,
   registrationId: number,
@@ -33,12 +41,10 @@ async function downloadAndSaveApaarPdf(
       return null;
     }
     const buffer = Buffer.from(await response.arrayBuffer());
-    // Save to /private-uploads/apaar/ — NOT inside /public so it's inaccessible to browser
     const uploadDir = path.join(process.cwd(), "private-uploads", "apaar");
     fs.mkdirSync(uploadDir, { recursive: true });
     const filename = `apaar_reg${registrationId}_child${childIndex}_${Date.now()}.pdf`;
-    const filePath = path.join(uploadDir, filename);
-    fs.writeFileSync(filePath, buffer);
+    fs.writeFileSync(path.join(uploadDir, filename), buffer);
     return `apaar/${filename}`;
   } catch (err) {
     console.error("[APAAR] Error saving PDF:", err);
@@ -58,13 +64,12 @@ export async function POST(request: NextRequest) {
       parentDigilockerClientId,
     } = body;
 
-    // ── 1. Verify signature ───────────────────────────────────────────────
-    const isValid = verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature);
-    if (!isValid) {
+    // ── 1. Verify Razorpay signature ─────────────────────────────────────
+    if (!verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
       return NextResponse.json({ success: false, error: "Payment verification failed" }, { status: 400 });
     }
 
-    // ── 2. Load parent DigiLocker session data if available ───────────────
+    // ── 2. Load parent DigiLocker session data ────────────────────────────
     let parentMaskedAadhaar: string | null = null;
     let parentAadhaarLocalPdf: string | null = null;
 
@@ -75,24 +80,33 @@ export async function POST(request: NextRequest) {
           [parentDigilockerClientId]
         );
         if (digiRows?.length) {
-          parentMaskedAadhaar    = digiRows[0].aadhaar_masked_number || null;
-          parentAadhaarLocalPdf  = digiRows[0].aadhaar_local_pdf     || null;
+          parentMaskedAadhaar   = digiRows[0].aadhaar_masked_number || null;
+          parentAadhaarLocalPdf = digiRows[0].aadhaar_local_pdf     || null;
         }
       } catch (e) {
         console.warn("[RazorpayVerify] DigiLocker session lookup warn:", e);
       }
     }
 
-    // Support both old shape (firstName/lastName) and new shape (full_name)
-    let firstName = formData.firstName || "";
-    let lastName  = formData.lastName  || "";
+    // ── 3. Derive safe field values ───────────────────────────────────────
+    // Split full_name into first / last (supports both old and new form shape)
+    let firstName = str(formData.firstName);
+    let lastName  = str(formData.lastName);
     if (!firstName && formData.full_name) {
-      const parts = (formData.full_name as string).trim().split(/\s+/);
-      firstName = parts[0] || "";
+      const parts = str(formData.full_name).split(/\s+/).filter(Boolean);
+      firstName = parts[0]            || "";
       lastName  = parts.slice(1).join(" ") || "";
     }
+    // Ensure first_name is never blank (NOT NULL in DB)
+    if (!firstName) firstName = str(formData.full_name, "Unknown");
 
-    // ── 3. Save registration ──────────────────────────────────────────────
+    // city: parent form has no city field — derive from state or address
+    const cityValue = str(formData.city) || str(formData.state) || "—";
+
+    // pan_number: NULL is fine (column is nullable after migration)
+    const panNumber = strOrNull(formData.panNumber);
+
+    // ── 4. Save parent registration ───────────────────────────────────────
     const [result]: any = await db.execute(
       `INSERT INTO parent_registrations (
         public_user_id,
@@ -106,16 +120,25 @@ export async function POST(request: NextRequest) {
         digilocker_verified_at
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
-        publicUserId || null,
-        firstName, lastName, formData.email,
-        formData.phone, formData.panNumber,
-        formData.address, formData.city || null, formData.state,
-        parseFloat(formData.feeAmount), formData.feePeriod,
-        formData.reasonForSupport, formData.otherReason || null,
-        formData.description, parseInt(formData.repaymentDuration),
-        razorpay_order_id, razorpay_payment_id,
+        publicUserId   || null,
+        firstName,
+        lastName,
+        str(formData.email),
+        str(formData.phone),
+        panNumber,
+        str(formData.address),
+        cityValue,
+        str(formData.state),
+        parseFloat(formData.feeAmount)      || 0,
+        str(formData.feePeriod),
+        str(formData.reasonForSupport),
+        strOrNull(formData.otherReason),
+        str(formData.description),
+        parseInt(formData.repaymentDuration) || 0,
+        razorpay_order_id,
+        razorpay_payment_id,
         "paid", 11.00, "pending",
-        parentDigilockerClientId || null,
+        strOrNull(parentDigilockerClientId),
         parentMaskedAadhaar,
         parentAadhaarLocalPdf,
         parentDigilockerClientId ? new Date() : null,
@@ -124,18 +147,15 @@ export async function POST(request: NextRequest) {
 
     const registrationId = result.insertId;
 
-    // ── 4. Save children with APAAR doc ──────────────────────────────────
-    const childrenToInsert = formData.children.slice(0, formData.numberOfChildren);
+    // ── 5. Save children ──────────────────────────────────────────────────
+    const childrenToInsert = (formData.children || []).slice(0, formData.numberOfChildren || 1);
     for (let i = 0; i < childrenToInsert.length; i++) {
       const c = childrenToInsert[i];
 
-      // Download & store APAAR PDF locally (admin-only access)
       let apaarDocPath: string | null = null;
       if (c.apaarDocUrl) {
         apaarDocPath = await downloadAndSaveApaarPdf(c.apaarDocUrl, registrationId, i + 1);
-        if (apaarDocPath) {
-          console.log(`[APAAR] Saved PDF for child ${i + 1}: ${apaarDocPath}`);
-        }
+        if (apaarDocPath) console.log(`[APAAR] Saved PDF for child ${i + 1}: ${apaarDocPath}`);
       }
 
       await db.execute(
@@ -148,23 +168,26 @@ export async function POST(request: NextRequest) {
            apaar_doc_path, apaar_doc_url)
          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
-          registrationId, i + 1,
-          c.fullName, c.classGrade,
-          c.admissionNumber, c.schoolName, c.schoolCity,
-          c.apaarId || c.manualApaarId || null,
-          c.apaarId || c.manualApaarId || null,
-          c.apaarLocalPdf || apaarDocPath || null,
-          c.digilockerClientId || null,
+          registrationId,
+          i + 1,
+          str(c.fullName),
+          str(c.classGrade),
+          str(c.admissionNumber),
+          str(c.schoolName),
+          str(c.schoolCity),
+          strOrNull(c.apaarId)         || strOrNull(c.manualApaarId),
+          strOrNull(c.apaarId)         || strOrNull(c.manualApaarId),
+          strOrNull(c.apaarLocalPdf)   || apaarDocPath,
+          strOrNull(c.digilockerClientId),
           c.digilockerVerified ? 1 : 0,
-          c.digilockerFullName || null,
-          c.docGender || null,
-          c.docDob || null,
+          strOrNull(c.digilockerFullName),
+          strOrNull(c.docGender),
+          strOrNull(c.docDob),
           apaarDocPath,
-          c.apaarDocUrl || null,
+          strOrNull(c.apaarDocUrl),
         ]
       );
 
-      // Link digilocker session to this registration
       if (c.digilockerClientId) {
         try {
           await db.execute(
@@ -175,25 +198,31 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── 5. Email to parent ────────────────────────────────────────────────
+    // ── 6. Confirmation email to parent ───────────────────────────────────
     try {
       await sendEmail(formData.email, "parentRegistrationConfirmation", {
         name: `${firstName} ${lastName}`.trim(),
-        registrationId, paymentId: razorpay_payment_id,
-        feeAmount: formData.feeAmount, feePeriod: formData.feePeriod,
+        registrationId,
+        paymentId: razorpay_payment_id,
+        feeAmount: formData.feeAmount,
+        feePeriod: formData.feePeriod,
         numberOfChildren: formData.numberOfChildren,
         children: childrenToInsert,
       });
     } catch (e) { console.error("Parent email failed (non-fatal):", e); }
 
-    // ── 5. Admin alert ────────────────────────────────────────────────────
+    // ── 7. Admin alert ────────────────────────────────────────────────────
     try {
       await sendEmail("vishwnet.schoolfee@gmail.com", "parentRegistrationAdminAlert", {
         name: `${firstName} ${lastName}`.trim(),
-        email: formData.email, phone: formData.phone,
-        registrationId, paymentId: razorpay_payment_id,
-        feeAmount: formData.feeAmount, numberOfChildren: formData.numberOfChildren,
-        city: formData.city, state: formData.state,
+        email: formData.email,
+        phone: formData.phone,
+        registrationId,
+        paymentId: razorpay_payment_id,
+        feeAmount: formData.feeAmount,
+        numberOfChildren: formData.numberOfChildren,
+        city: cityValue,
+        state: formData.state,
       });
     } catch (e) { console.error("Admin email failed (non-fatal):", e); }
 

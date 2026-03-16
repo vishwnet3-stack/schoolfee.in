@@ -14,11 +14,11 @@ export default function FaqPage() {
     },
     {
       q: "Who can apply for Schoolfee support?",
-      a: "Parents or legal guardians of students from Nursery to Class 7 who are facing temporary financial difficulty can apply.",
+      a: "Parents or legal guardians of students from Nursery to Class 9 who are facing temporary financial difficulty can apply.",
     },
     {
       q: "How long do I get to repay the supported amount?",
-      a: "You are expected to repay the supported amount within 2 to 3 months, as agreed at the time of approval.",
+      a: "You are expected to repay the supported amount within 2 to 12 months, as agreed at the time of approval.",
     },
     {
       q: "Does applying guarantee approval?",

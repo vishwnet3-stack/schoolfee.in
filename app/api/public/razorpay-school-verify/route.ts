@@ -4,37 +4,39 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/mailer";
 
-const RAZORPAY_KEY_SECRET = "tJgfeUFLJvJtAlbSj4apzx2l"; // ✅ Must match order route
+// ── Secret loaded from .env — change only .env to switch test ↔ live
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET!;
 
 function verifySignature(orderId: string, paymentId: string, signature: string): boolean {
   const body     = `${orderId}|${paymentId}`;
-  const expected = crypto
-    .createHmac("sha256", RAZORPAY_KEY_SECRET)
-    .update(body)
-    .digest("hex");
+  const expected = crypto.createHmac("sha256", RAZORPAY_KEY_SECRET).update(body).digest("hex");
   return expected === signature;
+}
+
+function str(val: any, fallback = ""): string {
+  if (val === null || val === undefined) return fallback;
+  const s = String(val).trim();
+  return s.length > 0 ? s : fallback;
+}
+function strOrNull(val: any): string | null {
+  const s = str(val);
+  return s.length > 0 ? s : null;
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature,
-      formData,
-      publicUserId,
-    } = body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, formData, publicUserId } = body;
 
-    // ── 1. Verify Razorpay signature ──────────────────────────────────────
     if (!verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
-      return NextResponse.json(
-        { success: false, error: "Payment verification failed" },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: "Payment verification failed" }, { status: 400 });
     }
 
-    // ── 2. Save school registration ───────────────────────────────────────
+    const cityValue = str(formData.city) || str(formData.state) || "—";
+    const board     = str(formData.affiliation_board) === "Other"
+      ? str(formData.otherAffiliationBoard, "Other")
+      : str(formData.affiliation_board);
+
     const [result]: any = await db.execute(
       `INSERT INTO school_registrations (
         public_user_id,
@@ -49,80 +51,55 @@ export async function POST(request: NextRequest) {
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         publicUserId || null,
-        formData.school_name,
-        formData.school_type,
-        parseInt(formData.established_year),
-        formData.affiliation_board,
-        formData.otherAffiliationBoard || null,
-        formData.affiliation_id,
-        formData.school_address,
-        formData.city,
-        formData.state,
-        formData.pincode,
-        formData.contact_number,
-        formData.alternate_contact || null,
-        formData.official_email,
-        formData.website_url || null,
-        formData.principal_name,
-        formData.principal_email,
-        formData.principal_contact,
-        parseInt(formData.total_students),
-        parseInt(formData.total_teachers),
-        formData.infrastructure_details || null,
+        str(formData.school_name),
+        str(formData.school_type),
+        parseInt(formData.established_year) || 2000,
+        str(formData.affiliation_board),
+        strOrNull(formData.otherAffiliationBoard),
+        str(formData.affiliation_id),
+        str(formData.school_address),
+        cityValue,
+        str(formData.state),
+        str(formData.pincode, "000000"),
+        str(formData.contact_number),
+        strOrNull(formData.alternate_contact),
+        str(formData.official_email),
+        strOrNull(formData.website_url),
+        str(formData.principal_name),
+        str(formData.principal_email),
+        str(formData.principal_contact),
+        parseInt(formData.total_students) || 0,
+        parseInt(formData.total_teachers) || 0,
+        strOrNull(formData.infrastructure_details),
         razorpay_order_id,
         razorpay_payment_id,
-        "paid",
-        1111.00,
-        "pending",
+        "paid", 1111.00, "pending",
       ]
     );
 
     const registrationId = result.insertId;
 
-    // ── 3. Confirmation email to school ───────────────────────────────────
     try {
       await sendEmail(formData.official_email, "schoolRegistrationConfirmation", {
-        schoolName:    formData.school_name,
-        registrationId,
-        paymentId:     razorpay_payment_id,
-        principalName: formData.principal_name,
-        board:         formData.affiliation_board === "Other"
-                         ? formData.otherAffiliationBoard
-                         : formData.affiliation_board,
-        city:          formData.city,
-        state:         formData.state,
+        schoolName: formData.school_name, registrationId,
+        paymentId: razorpay_payment_id, principalName: formData.principal_name,
+        board, city: cityValue, state: formData.state,
       });
     } catch (e) { console.error("School confirmation email failed (non-fatal):", e); }
 
-    // ── 4. Admin alert ────────────────────────────────────────────────────
     try {
       await sendEmail("vishwnet.schoolfee@gmail.com", "schoolRegistrationAdminAlert", {
-        schoolName:    formData.school_name,
-        schoolType:    formData.school_type,
-        registrationId,
-        paymentId:     razorpay_payment_id,
-        principalName: formData.principal_name,
-        email:         formData.official_email,
-        phone:         formData.contact_number,
-        city:          formData.city,
-        state:         formData.state,
-        board:         formData.affiliation_board === "Other"
-                         ? formData.otherAffiliationBoard
-                         : formData.affiliation_board,
-        totalStudents: formData.total_students,
+        schoolName: formData.school_name, schoolType: formData.school_type,
+        registrationId, paymentId: razorpay_payment_id,
+        principalName: formData.principal_name, email: formData.official_email,
+        phone: formData.contact_number, city: cityValue,
+        state: formData.state, board, totalStudents: formData.total_students,
       });
     } catch (e) { console.error("Admin email failed (non-fatal):", e); }
 
-    return NextResponse.json({
-      success: true,
-      registrationId,
-      message: "School registration submitted successfully",
-    });
+    return NextResponse.json({ success: true, registrationId, message: "School registration submitted successfully" });
   } catch (error: any) {
     console.error("School verify/save error:", error);
-    return NextResponse.json(
-      { success: false, error: error?.message || "Server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error?.message || "Server error" }, { status: 500 });
   }
 }

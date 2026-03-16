@@ -6,16 +6,18 @@ import { toast } from "sonner";
 import {
   FaUserTie, FaChild, FaMoneyBillWave, FaCheckCircle,
   FaIdCard, FaShieldAlt, FaLock, FaFingerprint, FaExternalLinkAlt,
-  FaCheckDouble, FaSpinner, FaTimesCircle, FaEye, FaEyeSlash,
+  FaCheckDouble, FaSpinner, FaEye, FaEyeSlash,
 } from "react-icons/fa";
 import { IoMdCheckmark } from "react-icons/io";
 import { useAuthSession } from "@/hooks/useAuthSession";
 import {
   AlertCircle, CheckCircle2, Shield, Loader2, Mail, ChevronRight,
+  CreditCard, Save, Send, PartyPopper,
 } from "lucide-react";
 
 declare global { interface Window { Razorpay: any; } }
-const RAZORPAY_KEY_ID = "rzp_test_SNWMyYGGnFaJ0I";
+// ── Key loaded from .env — change only NEXT_PUBLIC_RAZORPAY_KEY_ID in .env
+const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!;
 const SESSION_KEY = "parent_reg_progress";
 const DIGI_SESSION_KEY = "parent_digilocker_result";
 
@@ -41,13 +43,14 @@ type ChildDigiData = {
   dateOfBirth: string | null;
   gender: string | null;
   apaarLocalPdf: string | null;
+  apaarDocUrl: string | null;  // S3 download URL fallback when local PDF save failed
   noApaarDoc: boolean;
 } | null;
 
 const emptyChild = () => ({
   fullName: "", classGrade: "", admissionNumber: "",
   schoolName: "", schoolCity: "",
-  hasApaarId: "" as "" | "yes" | "no",
+  hasApaarId: "yes" as "" | "yes" | "no",  // default open
   manualApaarId: "",
   digilockerClientId: "",
   digilockerStatus: "" as "" | "initiated" | "completed" | "failed",
@@ -102,11 +105,11 @@ type PersistedState = {
 };
 
 function saveSession(state: PersistedState) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(state)); } catch {}
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(state)); } catch {}
 }
 function loadSession(): PersistedState | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as PersistedState;
   } catch { return null; }
@@ -203,6 +206,10 @@ export default function ParentRegistrationPage() {
   const [isInitiating, setIsInitiating]     = useState(false);
   const [showAadhaarPill, setShowAadhaarPill] = useState(false);
   const loadedRef = useRef(false);
+  // Gate: don't persist state until we've restored from localStorage first.
+  // Without this, the very first render fires saveSession with blank defaults,
+  // overwriting the saved verified email + form data before restore can run.
+  const sessionRestoredRef = useRef(false);
 
   const [emailStatus,      setEmailStatus]      = useState<EmailStatus>("idle");
   const [emailBlockReason, setEmailBlockReason] = useState("");
@@ -211,17 +218,17 @@ export default function ParentRegistrationPage() {
   const emailDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastCheckedEmail = useRef("");
 
-  const [childDigiData,   setChildDigiData]   = useState<(ChildDigiData)[]>(Array(5).fill(null));
-  const [childDigiStatus, setChildDigiStatus] = useState<DigiStatus[]>(Array(5).fill("idle") as DigiStatus[]);
-  const [childInitiating, setChildInitiating] = useState<boolean[]>(Array(5).fill(false));
+  const [childDigiData,   setChildDigiData]   = useState<(ChildDigiData)[]>(Array(7).fill(null));
+  const [childDigiStatus, setChildDigiStatus] = useState<DigiStatus[]>(Array(7).fill("idle") as DigiStatus[]);
+  const [childInitiating, setChildInitiating] = useState<boolean[]>(Array(7).fill(false));
 
   const [autoFilled, setAutoFilled] = useState<Record<string, boolean>>({});
 
   const [formData, setFormData] = useState<FormData>({
     full_name: "", dob: "", gender: "", phone: "", email: "",
     address: "", state: "", pincode: "", panNumber: "",
-    numberOfChildren: 0,
-    children: Array.from({ length: 5 }, emptyChild),
+    numberOfChildren: 1,
+    children: Array.from({ length: 7 }, emptyChild),
     feeAmount: "", feePeriod: "", reasonForSupport: "",
     otherReason: "", description: "", repaymentDuration: "",
   });
@@ -238,25 +245,60 @@ export default function ParentRegistrationPage() {
       setEmailBlockReason(saved.emailBlockReason || "");
       setAutoFilled(saved.autoFilled || {});
       if (saved.digiStatus) setDigiStatus(saved.digiStatus);
+      // Restore lastCheckedEmail so that a restored verified email is NOT re-checked on mount
+      if (saved.emailStatus === "verified" || saved.emailStatus === "waitlist_verified") {
+        lastCheckedEmail.current = saved.formData.email;
+      }
     }
-    const digiRaw = sessionStorage.getItem(DIGI_SESSION_KEY);
+    const digiRaw = localStorage.getItem(DIGI_SESSION_KEY);
     if (digiRaw) {
       try { setParentDigiData(JSON.parse(digiRaw)); } catch {}
     }
-    for (let i = 0; i < 5; i++) {
-      const raw = sessionStorage.getItem("parent_child_digi_" + i);
+    // Restore child DigiLocker results and sync into formData.children
+    const childDigiUpdates: Array<{ index: number; data: NonNullable<ChildDigiData> }> = [];
+    for (let i = 0; i < 7; i++) {
+      const raw = localStorage.getItem("parent_child_digi_" + i);
       if (raw) {
         try {
-          const d = JSON.parse(raw);
+          const d: NonNullable<ChildDigiData> = JSON.parse(raw);
           setChildDigiData(prev => { const n = [...prev]; n[i] = d; return n; });
           setChildDigiStatus(prev => { const n = [...prev]; n[i] = "completed"; return n; });
+          childDigiUpdates.push({ index: i, data: d });
         } catch {}
       }
     }
+    // Sync restored child digi data into formData.children so that
+    // digilockerVerified / apaarLocalPdf / apaarDocUrl are always up-to-date,
+    // even when parent_reg_progress was saved before the child APAAR callback ran.
+    if (childDigiUpdates.length > 0) {
+      setFormData(prev => {
+        const nc = [...prev.children];
+        for (const { index, data } of childDigiUpdates) {
+          nc[index] = {
+            ...nc[index],
+            apaarId:            data.apaarId            || nc[index].apaarId            || "",
+            digilockerClientId: data.clientId           || nc[index].digilockerClientId || "",
+            digilockerStatus:   "completed",
+            digilockerVerified: true,
+            digilockerFullName: data.fullName           || nc[index].digilockerFullName || "",
+            apaarLocalPdf:      data.apaarLocalPdf      || nc[index].apaarLocalPdf      || "",
+            apaarDocUrl:        data.apaarDocUrl        || nc[index].apaarDocUrl        || "",
+            docGender:          data.gender             || nc[index].docGender          || "",
+            docDob:             data.dateOfBirth        || nc[index].docDob             || "",
+          };
+        }
+        return { ...prev, children: nc };
+      });
+    }
+    // Allow persist effect to run ONLY after we've restored — prevents blank
+    // default state from overwriting the saved verified email / form progress.
+    sessionRestoredRef.current = true;
   }, []);
 
-  // Persist session
+  // Persist session — only after initial restore has run, so blank defaults
+  // never overwrite a previously saved verified email or form progress.
   useEffect(() => {
+    if (!sessionRestoredRef.current) return;
     saveSession({ formData, currentStep, emailStatus, emailBlockReason, autoFilled, digiStatus });
   }, [formData, currentStep, emailStatus, emailBlockReason, autoFilled, digiStatus]);
 
@@ -302,7 +344,7 @@ export default function ParentRegistrationPage() {
   useEffect(() => {
     if (loadedRef.current) return;
     if (searchParams.get("digilocker") !== "done") return;
-    const stored = sessionStorage.getItem(DIGI_SESSION_KEY);
+    const stored = localStorage.getItem(DIGI_SESSION_KEY);
 
     if (stored) {
       try {
@@ -323,14 +365,14 @@ export default function ParentRegistrationPage() {
     }
 
     // Handle child APAAR result
-    const childResultStr = sessionStorage.getItem("parent_digilocker_result_for_child");
+    const childResultStr = localStorage.getItem("parent_digilocker_result_for_child");
     if (childResultStr) {
       try {
         const { childIndex, result } = JSON.parse(childResultStr);
         if (typeof childIndex === "number" && result) {
           applyChildDigiResult(childIndex, result);
-          sessionStorage.removeItem("parent_digilocker_result_for_child");
-          sessionStorage.removeItem("parent_digilocker_pending_child");
+          localStorage.removeItem("parent_digilocker_result_for_child");
+          localStorage.removeItem("parent_digilocker_pending_child");
           loadedRef.current = true;
           toast.success("APAAR verification complete for Child " + (childIndex + 1) + ".", { duration: 4000 });
         }
@@ -380,7 +422,9 @@ export default function ParentRegistrationPage() {
   }, [autoFilled, parentDigiData, digiStatus]);
 
   useEffect(() => {
-    if (user?.email && !formData.email) {
+    // Only autofill email from user session if the email is blank AND not already verified.
+    // If emailStatus is verified/waitlist_verified (restored from localStorage), never touch it.
+    if (user?.email && !formData.email && emailStatus !== "verified" && emailStatus !== "waitlist_verified") {
       setFormData(p => ({ ...p, email: user.email }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -397,8 +441,19 @@ export default function ParentRegistrationPage() {
   const runSilentEmailCheck = useCallback(async (email: string) => {
     if (!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) return;
     if (email === lastCheckedEmail.current) return;
+    // Never downgrade a verified email — if already verified, keep that status
+    setEmailStatus(prev => {
+      if (prev === "verified" || prev === "waitlist_verified") return prev;
+      return "checking";
+    });
+    // If we're already verified for this email, don't re-check
     lastCheckedEmail.current = email;
-    setEmailStatus("checking");
+    let currentlyVerified = false;
+    setEmailStatus(prev => {
+      if (prev === "verified" || prev === "waitlist_verified") { currentlyVerified = true; }
+      return prev;
+    });
+    if (currentlyVerified) return;
     setEmailBlockReason("");
     try {
       const res = await fetch("/api/public/parent/check-email", {
@@ -412,6 +467,7 @@ export default function ParentRegistrationPage() {
         setEmailBlockReason(data.error || "This email cannot be used.");
       } else if (data.status === "waitlist_verified") {
         setEmailStatus("waitlist_verified");
+        setErrors(prev => { const e = { ...prev }; delete e.email_verify; delete e.email; return e; });
       } else if (!res.ok || (!data.success && data.error)) {
         setEmailStatus("blocked");
         setEmailBlockReason(data.error || "Unable to verify email. Please try a different one.");
@@ -453,6 +509,7 @@ export default function ParentRegistrationPage() {
       const data = await res.json();
       if (!data.success) { toast.error(data.error || "Invalid OTP."); return; }
       setEmailStatus("verified");
+      setErrors(prev => { const e = { ...prev }; delete e.email_verify; delete e.email; return e; });
       toast.success("Email verified.");
     } catch {
       toast.error("Could not verify OTP. Please try again.");
@@ -470,8 +527,8 @@ export default function ParentRegistrationPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) { toast.error(data.error || "Failed to connect to DigiLocker."); return; }
-      sessionStorage.removeItem(DIGI_SESSION_KEY);
-      sessionStorage.setItem("parent_digilocker_flow", "parent"); // ← tells callback to fetch Aadhaar+PAN
+      localStorage.removeItem(DIGI_SESSION_KEY);
+      localStorage.setItem("parent_digilocker_flow", "parent"); // ← tells callback to fetch Aadhaar+PAN
       loadedRef.current = false;
       setDigiStatus("initiated");
       window.location.href = data.digilockerUrl;
@@ -483,7 +540,7 @@ export default function ParentRegistrationPage() {
   const applyChildDigiResult = (childIndex: number, result: NonNullable<ChildDigiData>) => {
     setChildDigiData(prev => { const n = [...prev]; n[childIndex] = result; return n; });
     setChildDigiStatus(prev => { const n = [...prev]; n[childIndex] = "completed"; return n; });
-    sessionStorage.setItem("parent_child_digi_" + childIndex, JSON.stringify(result));
+    localStorage.setItem("parent_child_digi_" + childIndex, JSON.stringify(result));
     setFormData(prev => {
       const nc = [...prev.children];
       nc[childIndex] = {
@@ -494,6 +551,7 @@ export default function ParentRegistrationPage() {
         digilockerVerified: true,
         digilockerFullName: result.fullName || "",
         apaarLocalPdf:      result.apaarLocalPdf || "",
+        apaarDocUrl:        result.apaarDocUrl || "",
         docGender:          result.gender || "",
         docDob:             result.dateOfBirth || "",
       };
@@ -512,14 +570,21 @@ export default function ParentRegistrationPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.success) { toast.error(data.error || "Failed to connect to DigiLocker."); return; }
-      sessionStorage.setItem("parent_digilocker_pending_child", JSON.stringify({ childIndex }));
-      sessionStorage.setItem("parent_digilocker_flow", "child"); // ← tells callback to fetch APAAR
-      sessionStorage.removeItem("parent_digilocker_result_for_child");
+      localStorage.setItem("parent_digilocker_pending_child", JSON.stringify({ childIndex }));
+      localStorage.setItem("parent_digilocker_flow", "child"); // ← tells callback to fetch APAAR
+      localStorage.removeItem("parent_digilocker_result_for_child");
       setChildDigiStatus(prev => { const n = [...prev]; n[childIndex] = "initiated"; return n; });
-      setFormData(prev => {
-        const nc = [...prev.children];
-        nc[childIndex] = { ...nc[childIndex], digilockerClientId: data.clientId, digilockerStatus: "initiated" };
-        return { ...prev, children: nc };
+      const updatedChildren = [...formData.children];
+      updatedChildren[childIndex] = { ...updatedChildren[childIndex], digilockerClientId: data.clientId, digilockerStatus: "initiated" };
+      setFormData(prev => ({ ...prev, children: updatedChildren }));
+      // Explicitly save session BEFORE redirect — React useEffect may not fire before navigation
+      saveSession({
+        formData: { ...formData, children: updatedChildren },
+        currentStep,
+        emailStatus,
+        emailBlockReason,
+        autoFilled,
+        digiStatus,
       });
       window.location.href = data.digilockerUrl;
     } catch (err: any) {
@@ -621,33 +686,30 @@ export default function ParentRegistrationPage() {
     if (!formData.dob)                      e.dob        = "Date of birth is required";
     if (!formData.gender)                   e.gender     = "Gender is required";
     if (!formData.phone.match(/^\d{10}$/))  e.phone      = "Valid 10-digit phone required";
-    if (!formData.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) e.email = "Valid email required";
     if (!formData.address.trim())           e.address    = "Address is required";
     if (!formData.state)                    e.state      = "State is required";
+    // PAN comes exclusively from DigiLocker — no manual entry.
+    // Validate only if a value is present (format check).
     if (formData.panNumber && !formData.panNumber.match(/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/)) {
       e.panNumber = "Invalid PAN format (e.g. ABCDE1234F)";
-    } else if (!formData.panNumber && digiStatus !== "completed") {
-      e.panNumber = "Valid PAN required (e.g. ABCDE1234F)";
-    } else if (!formData.panNumber && digiStatus === "completed" && !parentDigiData?.panNoPan) {
-      e.panNumber = "Valid PAN required (e.g. ABCDE1234F)";
     }
-    if (!isEmailVerified)                   e.email_verify = "Please verify your email before continuing";
     setErrors(e); return Object.keys(e).length === 0;
   };
 
   const validateStep2 = () => {
     const e: Record<string, string> = {};
-    if (formData.numberOfChildren === 0) { e.numberOfChildren = "Please select number of children"; setErrors(e); return false; }
     for (let i = 0; i < formData.numberOfChildren; i++) {
       const c = formData.children[i];
+      const storedDigi = childDigiData[i];
+      const isChildVerified = c.digilockerVerified || childDigiStatus[i] === "completed" || !!storedDigi;
       if (!c.fullName.trim())        e["child" + i + "fullName"]        = "Child name is required";
       if (!c.classGrade.trim())      e["child" + i + "classGrade"]      = "Class/Grade is required";
       if (!c.admissionNumber.trim()) e["child" + i + "admissionNumber"] = "Admission number is required";
       if (!c.schoolName.trim())      e["child" + i + "schoolName"]      = "School name is required";
       if (!c.schoolCity.trim())      e["child" + i + "schoolCity"]      = "School city is required";
       if (!c.hasApaarId)             e["child" + i + "hasApaarId"]      = "Please select if child has APAAR ID";
-      if (c.hasApaarId === "yes" && !c.digilockerVerified && !c.manualApaarId.trim()) {
-        e["child" + i + "apaarId"] = "Please verify APAAR ID via DigiLocker or enter manually";
+      if (c.hasApaarId === "yes" && !isChildVerified) {
+        e["child" + i + "apaarId"] = "Please verify APAAR ID via DigiLocker to continue";
       }
     }
     setErrors(e); return Object.keys(e).length === 0;
@@ -655,6 +717,8 @@ export default function ParentRegistrationPage() {
 
   const validateStep3 = () => {
     const e: Record<string, string> = {};
+    if (!formData.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) e.email = "Valid email required";
+    if (!isEmailVerified)                   e.email_verify = "Please verify your email before continuing";
     if (!formData.feeAmount || parseFloat(formData.feeAmount) <= 0) e.feeAmount = "Valid fee amount is required";
     if (!formData.feePeriod) e.feePeriod = "Fee period is required";
     if (!formData.reasonForSupport) e.reasonForSupport = "Reason for support is required";
@@ -713,10 +777,13 @@ export default function ParentRegistrationPage() {
             });
             const verifyData = await verifyRes.json();
             if (!verifyData.success) throw new Error(verifyData.error || "Verification failed");
-            sessionStorage.removeItem(SESSION_KEY);
-            sessionStorage.removeItem(DIGI_SESSION_KEY);
-            sessionStorage.removeItem("parent_digilocker_client_id");
-            for (let i = 0; i < 5; i++) sessionStorage.removeItem("parent_child_digi_" + i);
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(DIGI_SESSION_KEY);
+            localStorage.removeItem("parent_digilocker_client_id");
+            localStorage.removeItem("parent_digilocker_flow");
+            localStorage.removeItem("parent_digilocker_pending_child");
+            localStorage.removeItem("parent_digilocker_result_for_child");
+            for (let i = 0; i < 7; i++) localStorage.removeItem("parent_child_digi_" + i);
             toast.success("Registration submitted successfully.");
             setIsRedirecting(true);
             setRedirectStep(0);
@@ -791,10 +858,10 @@ export default function ParentRegistrationPage() {
   const progress = ((currentStep - 1) / (steps.length - 1)) * 100;
 
   const redirectMessages = [
-    { icon: "✓",  title: "Payment confirmed",     sub: "Your payment of Rs.11 was received"      },
-    { icon: "📋", title: "Saving your details",   sub: "Storing your registration securely"       },
-    { icon: "📧", title: "Sending confirmation",  sub: "Emailing your confirmation details"       },
-    { icon: "🎉", title: "Registration complete!", sub: "Taking you to your confirmation page..." },
+    { icon: <CheckCircle2 className="w-8 h-8 text-white" />,  title: "Payment confirmed",     sub: "Your payment of Rs.11 was received"      },
+    { icon: <Save        className="w-8 h-8 text-white" />,   title: "Saving your details",   sub: "Storing your registration securely"       },
+    { icon: <Send        className="w-8 h-8 text-white" />,   title: "Sending confirmation",  sub: "Emailing your confirmation details"       },
+    { icon: <PartyPopper className="w-8 h-8 text-white" />,   title: "Registration complete!", sub: "Taking you to your confirmation page..." },
   ];
 
   return (
@@ -809,7 +876,7 @@ export default function ParentRegistrationPage() {
               <div className="w-24 h-24 rounded-full border-4 border-white/10" />
               <div className="absolute inset-0 w-24 h-24 rounded-full border-4 border-transparent border-t-[#F4951D] border-r-white/40 animate-spin" />
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-3xl">{redirectMessages[redirectStep]?.icon}</span>
+                <span className="flex items-center justify-center">{redirectMessages[redirectStep]?.icon}</span>
               </div>
             </div>
             <h2 className="text-xl font-extrabold text-white mb-2">{redirectMessages[redirectStep]?.title}</h2>
@@ -1011,253 +1078,174 @@ export default function ParentRegistrationPage() {
                 <div className="px-4 sm:px-6 py-5">
 
                   {/* ── STEP 1 ── */}
-                  {currentStep === 1 && ((): JSX.Element => {
-                    const isDigiLocked = digiStatus !== "completed";
-                    const digiClass = isDigiLocked ? inpDisabled : inpLocked;
-                    return (
-                      <div className="space-y-4">
-                        <p className="text-sm text-slate-500">Please provide your details as they appear on official documents.</p>
+                  {currentStep === 1 && (
+                    <div className="space-y-4">
+                      <p className="text-sm text-slate-500">Please provide your details as they appear on official documents.</p>
 
-                        {digiStatus === "completed" && parentDigiData ? (
-                          <div className="rounded-[10px] border-2 border-green-300 px-4 py-3 flex items-center gap-3 mb-1"
-                            style={{ background: "linear-gradient(135deg,#f0fdf4,#dcfce7)" }}>
-                            <div className="w-9 h-9 rounded-[8px] bg-green-500 flex items-center justify-center flex-shrink-0">
-                              <Shield className="text-white h-5 w-5" />
+                      {/* DigiLocker connect card / verified banner */}
+                      {digiStatus === "completed" && parentDigiData ? (
+                        <div className="rounded-[10px] border-2 border-green-300 px-4 py-3 flex items-center gap-3 mb-1"
+                          style={{ background: "linear-gradient(135deg,#f0fdf4,#dcfce7)" }}>
+                          <div className="w-9 h-9 rounded-[8px] bg-green-500 flex items-center justify-center flex-shrink-0">
+                            <Shield className="text-white h-5 w-5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-green-800 text-sm">DigiLocker Verified — Fields Auto-filled</p>
+                            <p className="text-green-600 text-xs">Aadhaar details are locked below. You may edit unlocked fields.</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <DigiConnectCard
+                          digiStatus={digiStatus}
+                          isInitiating={isInitiating}
+                          onInitiate={handleInitiateDigilocker}
+                        />
+                      )}
+
+                      {/* DigiLocker-locked personal fields — identical locking pattern to TeacherRegistration */}
+                      {(() => {
+                        const isDigiLocked = digiStatus !== "completed";
+                        const digiClass = isDigiLocked ? inpDisabled : inpLocked;
+                        return (
+                          <>
+                            {/* Full Name */}
+                            <div>
+                              {fieldLbl("Full Name", !isDigiLocked)}
+                              <input type="text" name="full_name"
+                                placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "Enter your full name"}
+                                value={formData.full_name} onChange={handleInputChange}
+                                {...lockProps(true)}
+                                className={isDigiLocked ? digiClass : (autoFilled.full_name ? inpLocked : inp(errors.full_name))} />
+                              {errMsg(errors.full_name)}
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-bold text-green-800 text-sm">DigiLocker Verified — Fields Auto-filled</p>
-                              <p className="text-green-600 text-xs">Aadhaar details are locked below. You may edit other fields.</p>
+
+                            {/* DOB + Gender */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                              <div>
+                                {fieldLbl("Date of Birth", !isDigiLocked)}
+                                <input type="date" name="dob" value={formData.dob}
+                                  onChange={handleInputChange}
+                                  {...lockProps(true)}
+                                  max={new Date().toISOString().split("T")[0]}
+                                  className={isDigiLocked ? digiClass : (autoFilled.dob ? inpLocked : inp(errors.dob))} />
+                                {errMsg(errors.dob)}
+                              </div>
+                              <div>
+                                {fieldLbl("Gender", !isDigiLocked)}
+                                <select name="gender" value={formData.gender} onChange={handleInputChange}
+                                  {...lockProps(true)}
+                                  className={isDigiLocked ? digiClass : (autoFilled.gender ? inpLocked : inp(errors.gender))}>
+                                  <option value="">Select Gender</option>
+                                  <option value="Male">Male</option>
+                                  <option value="Female">Female</option>
+                                  <option value="Other">Other</option>
+                                </select>
+                                {errMsg(errors.gender)}
+                              </div>
                             </div>
-                            {parentDigiData.aadhaarLocalPdf && (
-                              <button onClick={() => viewPdf(parentDigiData.aadhaarLocalPdf, "Aadhaar")}
-                                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-xs font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100">
-                                <FaExternalLinkAlt className="text-[10px]" /> Aadhaar PDF
-                              </button>
-                            )}
-                          </div>
-                        ) : (
-                          <DigiConnectCard
-                            digiStatus={digiStatus}
-                            isInitiating={isInitiating}
-                            onInitiate={handleInitiateDigilocker}
-                          />
-                        )}
 
-                        <div>
-                          {fieldLbl("Full Name", !isDigiLocked)}
-                          <input type="text" name="full_name"
-                            placeholder={isDigiLocked ? "Connect DigiLocker to fill" : formData.full_name || "Enter your full name"}
-                            value={formData.full_name} onChange={handleInputChange}
-                            {...lockProps(true)}
-                            className={isDigiLocked ? digiClass : (autoFilled.full_name ? inpLocked : inp(errors.full_name))} />
-                          {errMsg(errors.full_name)}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          <div>
-                            {fieldLbl("Date of Birth", !isDigiLocked)}
-                            <input type="date" name="dob" value={formData.dob} onChange={handleInputChange}
-                              {...lockProps(true)} max={new Date().toISOString().split("T")[0]}
-                              className={isDigiLocked ? digiClass : (autoFilled.dob ? inpLocked : inp(errors.dob))} />
-                            {errMsg(errors.dob)}
-                          </div>
-                          <div>
-                            {fieldLbl("Gender", !isDigiLocked)}
-                            <select name="gender" value={formData.gender} onChange={handleInputChange}
-                              {...lockProps(true)}
-                              className={isDigiLocked ? digiClass : (autoFilled.gender ? inpLocked : inp(errors.gender))}>
-                              <option value="">Select Gender</option>
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
-                              <option value="Other">Other</option>
-                            </select>
-                            {errMsg(errors.gender)}
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          <div>
-                            {fieldLbl("Phone Number", !isDigiLocked)}
-                            <input type="tel" name="phone"
-                              placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "10-digit mobile number"}
-                              value={formData.phone} onChange={handleInputChange} maxLength={10}
-                              {...lockProps(true)}
-                              className={isDigiLocked ? digiClass : (autoFilled.phone ? inpLocked : inp(errors.phone))} />
-                            {errMsg(errors.phone)}
-                          </div>
-
-                          <div>
-                            <div className="flex items-center justify-between mb-2">
-                              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                                Email Address <span className="text-red-500 normal-case">*</span>
-                              </label>
-                              {emailStatus === "checking" && (
-                                <span className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
-                                  <Loader2 className="h-3 w-3 animate-spin" /> Checking...
-                                </span>
-                              )}
-                              {isEmailVerified && (
-                                <span className="text-[10px] font-bold text-green-700 bg-green-100 border border-green-300 px-1.5 py-0.5 rounded-[4px]">
-                                  Verified
-                                </span>
-                              )}
+                            {/* Phone — full width now that email is moved to the bottom */}
+                            <div>
+                              {fieldLbl("Phone Number", !isDigiLocked)}
+                              <input type="tel" name="phone"
+                                placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "10-digit mobile number"}
+                                value={formData.phone} onChange={handleInputChange} maxLength={10}
+                                {...lockProps(true)}
+                                className={isDigiLocked ? digiClass : (autoFilled.phone ? inpLocked : inp(errors.phone))} />
+                              {errMsg(errors.phone)}
                             </div>
-                            <input type="email" name="email" placeholder="your.email@example.com"
-                              value={formData.email} onChange={handleInputChange}
-                              {...lockProps(isEmailVerified)}
-                              className={
-                                isEmailVerified ? inpLocked :
-                                emailStatus === "blocked"
-                                  ? "w-full px-3 py-2.5 rounded-[8px] border text-sm font-medium outline-none border-red-400 bg-red-50 text-red-900 placeholder-red-300"
-                                  : inp(errors.email)
-                              }
-                            />
-                            {emailStatus === "blocked" && (
-                              <div className="mt-2 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
-                                <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
-                                <p className="text-xs text-red-700 font-medium">{emailBlockReason}</p>
-                              </div>
-                            )}
-                            {emailStatus === "new_email" && (
-                              <div className="mt-2 rounded-[8px] border border-blue-200 bg-blue-50 px-3 py-2 flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-2 min-w-0">
-                                  <Mail className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                                  <p className="text-xs text-blue-800 font-medium truncate">Verify your email via OTP</p>
-                                </div>
-                                <button type="button" onClick={handleSendOtp} disabled={otpLoading}
-                                  className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-                                  style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
-                                  {otpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Send OTP"}
-                                </button>
-                              </div>
-                            )}
-                            {emailStatus === "otp_sent" && (
-                              <div className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-3 space-y-2">
-                                <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
-                                  <Mail className="h-3.5 w-3.5" /> OTP sent. Enter the 6-digit code:
-                                </p>
-                                <div className="flex flex-col gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <input type="text" placeholder="000000" value={otpValue}
-                                      onChange={e => setOtpValue(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                                      maxLength={6}
-                                      className="flex-1 min-w-0 px-3 py-2 rounded-[6px] border border-amber-300 bg-white text-sm font-mono font-bold text-slate-800 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 tracking-[0.3em]" />
-                                    <button type="button" onClick={handleVerifyOtp}
-                                      disabled={otpLoading || otpValue.length !== 6}
-                                      className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-[6px] text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
-                                      style={{ background: "linear-gradient(135deg,#0cab47,#08d451)" }}>
-                                      {otpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Verify OTP"}
-                                    </button>
-                                  </div>
-                                  <button type="button" onClick={handleSendOtp} disabled={otpLoading}
-                                    className="self-start text-xs text-slate-500 hover:text-[#00468E] font-medium underline disabled:opacity-50 transition-colors">
-                                    Did not receive it? Resend OTP
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                            {(errors.email || errors.email_verify) && emailStatus !== "blocked" && (
-                              <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3 shrink-0" />
-                                {errors.email || errors.email_verify}
-                              </p>
-                            )}
-                          </div>
-                        </div>
 
+                            {/* Address */}
+                            <div>
+                              {fieldLbl("Residential Address", !isDigiLocked)}
+                              <textarea name="address"
+                                placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "Enter your complete residential address"}
+                                rows={2} value={formData.address} onChange={handleInputChange}
+                                {...lockProps(true)}
+                                className={(isDigiLocked ? digiClass : (autoFilled.address ? inpLocked : inp(errors.address))) + " resize-none"} />
+                              {errMsg(errors.address)}
+                            </div>
+
+                            {/* State + PIN */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                              <div>
+                                {fieldLbl("State", !isDigiLocked)}
+                                <select name="state" value={formData.state} onChange={handleInputChange}
+                                  {...lockProps(true)}
+                                  className={isDigiLocked ? digiClass : (autoFilled.state ? inpLocked : inp(errors.state))}>
+                                  <option value="">Select State</option>
+                                  {indianStates.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                {errMsg(errors.state)}
+                              </div>
+                              <div>
+                                {fieldLbl("PIN Code", !isDigiLocked, false)}
+                                <input type="text" name="pincode"
+                                  placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "6-digit PIN code"}
+                                  value={formData.pincode} onChange={handleInputChange} maxLength={6}
+                                  {...lockProps(true)}
+                                  className={isDigiLocked ? digiClass : (autoFilled.pincode ? inpLocked : inp())} />
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+
+                      {/* PAN — shown only after DigiLocker. No input field ever. */}
+                      {digiStatus === "completed" && (
                         <div>
-                          {fieldLbl("Residential Address", !isDigiLocked)}
-                          <textarea name="address"
-                            placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "Enter your complete residential address"}
-                            rows={2} value={formData.address} onChange={handleInputChange}
-                            {...lockProps(true)}
-                            className={(isDigiLocked ? digiClass : (autoFilled.address ? inpLocked : inp(errors.address))) + " resize-none"} />
-                          {errMsg(errors.address)}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                          <div>
-                            {fieldLbl("State", !isDigiLocked)}
-                            <select name="state" value={formData.state} onChange={handleInputChange}
-                              {...lockProps(true)}
-                              className={isDigiLocked ? digiClass : (autoFilled.state ? inpLocked : inp(errors.state))}>
-                              <option value="">Select State</option>
-                              {indianStates.map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                            {errMsg(errors.state)}
-                          </div>
-                          <div>
-                            {fieldLbl("PIN Code", !isDigiLocked, false)}
-                            <input type="text" name="pincode"
-                              placeholder={isDigiLocked ? "Connect DigiLocker to fill" : "6-digit PIN code"}
-                              value={formData.pincode} onChange={handleInputChange} maxLength={6}
-                              {...lockProps(true)}
-                              className={isDigiLocked ? digiClass : (autoFilled.pincode ? inpLocked : inp())} />
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center justify-between mb-1">
                             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">
-                              PAN Number <span className="text-red-500 normal-case">*</span>
+                              PAN Card
                             </label>
-                            <div className="flex items-center gap-2">
-                              {parentDigiData?.panLocalPdf && (
-                                <button type="button"
-                                  onClick={() => viewPdf(parentDigiData.panLocalPdf, "PAN")}
-                                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-[6px] text-[10px] font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100">
-                                  <FaExternalLinkAlt className="text-[9px]" /> View PAN PDF
-                                </button>
-                              )}
-                              {autoFilled.panNumber && (
-                                <span className="text-[10px] font-bold text-green-700 bg-green-100 border border-green-300 px-1.5 py-0.5 rounded-[4px]">
-                                  From DigiLocker
-                                </span>
-                              )}
-                            </div>
                           </div>
-                          {digiStatus === "completed" && parentDigiData && !parentDigiData.panNumber && !parentDigiData.panLocalPdf ? (
-                            <div className="rounded-[8px] border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-2">
-                              <p className="text-xs text-amber-800 font-medium flex items-center gap-1.5">
-                                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                                PAN not found in your DigiLocker. Please enter it manually.
+                          {parentDigiData?.panNoPan ? (
+                            /* DigiLocker confirmed no PAN linked */
+                            <div className="rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                              <AlertCircle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                              <p className="text-xs text-amber-800 font-medium">
+                                No PAN found in your DigiLocker. Your application will proceed without PAN.
                               </p>
-                              <input type="text" name="panNumber" placeholder="ABCDE1234F"
-                                value={formData.panNumber}
-                                onChange={e => {
-                                  const synthetic = { ...e, target: { ...e.target, name: "panNumber", value: e.target.value.toUpperCase() } };
-                                  handleInputChange(synthetic as any);
-                                }}
-                                maxLength={10}
-                                className={inp(errors.panNumber) + " uppercase tracking-widest font-mono"} />
+                            </div>
+                          ) : parentDigiData?.panLocalPdf ? (
+                            /* PAN PDF available — show confirmation card with view button */
+                            <div className="rounded-[8px] border border-green-200 bg-green-50 px-3 py-2.5 flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                                <p className="text-xs font-bold text-green-800">PAN fetched from DigiLocker</p>
+                              </div>
+                              <button type="button"
+                                onClick={() => viewPdf(parentDigiData!.panLocalPdf, "PAN")}
+                                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-[10px] font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100">
+                                <FaExternalLinkAlt className="text-[9px]" /> View PAN PDF
+                              </button>
                             </div>
                           ) : (
-                            <input type="text" name="panNumber" placeholder="ABCDE1234F"
-                              value={formData.panNumber}
-                              onChange={e => {
-                                const synthetic = { ...e, target: { ...e.target, name: "panNumber", value: e.target.value.toUpperCase() } };
-                                handleInputChange(synthetic as any);
-                              }}
-                              maxLength={10}
-                              {...(autoFilled.panNumber ? lockProps(true) : {})}
-                              className={(autoFilled.panNumber ? inpLocked : inp(errors.panNumber)) + " uppercase tracking-widest font-mono"} />
+                            /* PAN not yet in DigiLocker but DigiLocker completed */
+                            <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2.5 flex items-start gap-2">
+                              <AlertCircle className="h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5" />
+                              <p className="text-xs text-slate-500 font-medium">
+                                PAN not linked in DigiLocker. Your application will proceed without PAN.
+                              </p>
+                            </div>
                           )}
-                          {errMsg(errors.panNumber)}
                         </div>
+                      )}
 
-                        {digiStatus === "completed" && parentDigiData?.maskedAadhaar && (
-                          <div className="bg-blue-50 rounded-[8px] border border-blue-200 p-3">
-                            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Aadhaar (Verified)</p>
-                            <p className="font-mono font-bold text-slate-800 text-sm flex items-center">
-                              {showAadhaarPill ? parentDigiData.maskedAadhaar : maskAadhaar(parentDigiData.maskedAadhaar)}
-                              <MaskToggle show={showAadhaarPill} onToggle={() => setShowAadhaarPill(v => !v)} />
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-0.5">Fetched from DigiLocker — Read-only</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
+                      {/* Aadhaar display pill — shown after DigiLocker verification */}
+                      {digiStatus === "completed" && parentDigiData?.maskedAadhaar && (
+                        <div className="bg-blue-50 rounded-[8px] border border-blue-200 p-3">
+                          <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Aadhaar (Verified)</p>
+                          <p className="font-mono font-bold text-slate-800 text-sm flex items-center">
+                            {showAadhaarPill ? parentDigiData.maskedAadhaar : maskAadhaar(parentDigiData.maskedAadhaar)}
+                            <MaskToggle show={showAadhaarPill} onToggle={() => setShowAadhaarPill(v => !v)} />
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Fetched from DigiLocker — Read-only</p>
+                        </div>
+                      )}
+
+                    </div>
+                  )}
 
                   {/* ── STEP 2 ── */}
                   {currentStep === 2 && (
@@ -1266,25 +1254,21 @@ export default function ParentRegistrationPage() {
                         Provide school details for each child. Verify APAAR ID via DigiLocker where available.
                       </p>
 
-                      <div>
-                        <label className={lbl}>Number of Children <span className="text-red-500 normal-case">*</span></label>
-                        <select value={formData.numberOfChildren}
-                          onChange={e => { setFormData(p => ({ ...p, numberOfChildren: parseInt(e.target.value) })); setErrors({}); }}
-                          className={inp(errors.numberOfChildren)}>
-                          <option value={0}>Select Number of Children</option>
-                          {[1,2,3,4,5].map(n => <option key={n} value={n}>{n} {n===1?"Child":"Children"}</option>)}
-                        </select>
-                        {errMsg(errors.numberOfChildren)}
-                      </div>
-
                       {Array.from({ length: formData.numberOfChildren }).map((_, index) => {
                         const child   = formData.children[index];
-                        const digiDat = childDigiData[index];
                         const digiSt  = childDigiStatus[index];
                         const initiat = childInitiating[index];
 
+                        const storedDigi        = childDigiData[index];
+                        const isVerified        = child.digilockerVerified || digiSt === "completed" || !!storedDigi;
+                        const effectiveApaarId  = child.apaarId       || storedDigi?.apaarId       || "";
+                        const effectiveLocalPdf = child.apaarLocalPdf || storedDigi?.apaarLocalPdf || "";
+                        const effectiveDocUrl   = child.apaarDocUrl   || storedDigi?.apaarDocUrl   || "";
+                        const effectiveFullName = child.digilockerFullName || storedDigi?.fullName  || "";
+
                         return (
                           <div key={index} className="rounded-[10px] border-2 border-slate-200 overflow-hidden">
+                            {/* Card header */}
                             <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-200"
                               style={{ background: "linear-gradient(135deg,#f8fafc,#f1f5f9)" }}>
                               <div className="flex items-center gap-2.5">
@@ -1292,14 +1276,158 @@ export default function ParentRegistrationPage() {
                                   style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>{index + 1}</div>
                                 <p className="font-extrabold text-slate-800 text-sm">Child {index + 1}</p>
                               </div>
-                              {child.digilockerVerified && (
-                                <span className="flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-[11px] font-bold px-2.5 py-1 rounded-full">
-                                  <FaCheckDouble className="text-[9px]" />APAAR Verified
-                                </span>
-                              )}
+                              <div className="flex items-center gap-2">
+                                {isVerified && (
+                                  <span className="flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-700 text-[11px] font-bold px-2.5 py-1 rounded-full">
+                                    <FaCheckDouble className="text-[9px]" />APAAR Verified
+                                  </span>
+                                )}
+                                {/* Remove child button — only show if more than 1 child */}
+                                {formData.numberOfChildren > 1 && (
+                                  <button type="button"
+                                    onClick={() => {
+                                      // Shift children down, clear last slot
+                                      const nc = [...formData.children];
+                                      nc.splice(index, 1);
+                                      nc.push(emptyChild());
+                                      // Shift digi data too
+                                      setChildDigiData(prev => {
+                                        const n = [...prev]; n.splice(index, 1); n.push(null); return n;
+                                      });
+                                      setChildDigiStatus(prev => {
+                                        const n = [...prev]; n.splice(index, 1); n.push("idle"); return n;
+                                      });
+                                      // Remove localStorage for removed slot and shift remaining
+                                      for (let i = index; i < formData.numberOfChildren - 1; i++) {
+                                        const next = localStorage.getItem("parent_child_digi_" + (i + 1));
+                                        if (next) localStorage.setItem("parent_child_digi_" + i, next);
+                                        else localStorage.removeItem("parent_child_digi_" + i);
+                                      }
+                                      localStorage.removeItem("parent_child_digi_" + (formData.numberOfChildren - 1));
+                                      setFormData(p => ({ ...p, numberOfChildren: p.numberOfChildren - 1, children: nc }));
+                                      setErrors({});
+                                    }}
+                                    className="flex items-center gap-1 text-[10px] font-bold text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-1 rounded-[6px] transition-colors">
+                                    <AlertCircle className="h-3 w-3" /> Remove
+                                  </button>
+                                )}
+                              </div>
                             </div>
 
                             <div className="p-4 space-y-4">
+
+                              {/* APAAR yes/no */}
+                              <div>
+                                <label className={lbl}>Does this child have an APAAR ID? <span className="text-red-500 normal-case">*</span></label>
+                                <div className="flex gap-3">
+                                  {(["yes", "no"] as const).map(val => (
+                                    <button key={val} type="button"
+                                      onClick={() => {
+                                        const nc = [...formData.children];
+                                        nc[index] = { ...nc[index], hasApaarId: val };
+                                        setFormData(p => ({ ...p, children: nc }));
+                                        if (errors["child" + index + "hasApaarId"]) setErrors(p => ({ ...p, ["child" + index + "hasApaarId"]: "" }));
+                                      }}
+                                      className={"flex-1 py-2.5 rounded-[8px] text-sm font-bold border-2 transition-all " + (
+                                        child.hasApaarId === val
+                                          ? val === "yes"
+                                            ? "bg-green-50 border-green-500 text-green-700"
+                                            : "bg-slate-100 border-slate-400 text-slate-700"
+                                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                      )}>
+                                      {val === "yes" ? "Yes" : "No"}
+                                    </button>
+                                  ))}
+                                </div>
+                                {errMsg(errors["child" + index + "hasApaarId"])}
+                              </div>
+
+                              {/* APAAR verification block */}
+                              {child.hasApaarId === "yes" && (
+                                <div className="rounded-[10px] border border-blue-200 bg-blue-50/50 p-4 space-y-3">
+                                  <p className="text-xs font-bold text-blue-800 uppercase tracking-wide">APAAR ID Verification</p>
+
+                                  {!isVerified ? (
+                                    /* ── Not yet verified: show Verify button ── */
+                                    <div className="rounded-[8px] border border-dashed border-[#00468E]/30 bg-white p-3">
+                                      <div className="flex items-start gap-3">
+                                        <div className="w-8 h-8 rounded-[7px] flex items-center justify-center flex-shrink-0"
+                                          style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
+                                          <FaFingerprint className="text-white text-sm" />
+                                        </div>
+                                        <div className="flex-1">
+                                          <p className="font-bold text-slate-800 text-xs mb-0.5">Verify via DigiLocker</p>
+                                          <p className="text-[11px] text-slate-500 mb-2">
+                                            Fetch APAAR ID automatically from Academic Bank of Credits. The ID will appear instantly.
+                                          </p>
+                                          {(digiSt === "idle" || digiSt === "error") && (
+                                            <button type="button"
+                                              onClick={() => handleInitiateChildDigilocker(index)}
+                                              disabled={initiat}
+                                              className="inline-flex items-center gap-2 px-4 py-2 rounded-[7px] text-white text-xs font-bold transition-all active:scale-95 disabled:opacity-60"
+                                              style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
+                                              {initiat
+                                                ? <><FaSpinner className="animate-spin" />Connecting...</>
+                                                : <><FaFingerprint />Verify APAAR via DigiLocker</>}
+                                            </button>
+                                          )}
+                                          {digiSt === "initiated" && (
+                                            <p className="text-[11px] text-amber-600 font-medium flex items-center gap-1.5">
+                                              <FaSpinner className="animate-spin" /> Waiting for DigiLocker...
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    /* ── Already verified: show compact card + View Document button ── */
+                                    <div className="rounded-[8px] bg-green-50 border border-green-200 px-3 py-3">
+                                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                                        <div className="flex items-start gap-2.5">
+                                          <FaCheckCircle className="text-green-500 flex-shrink-0 mt-0.5" />
+                                          <div>
+                                            <p className="text-xs font-bold text-green-800">APAAR Verified via DigiLocker</p>
+                                            {effectiveFullName && (
+                                              <p className="text-[11px] text-green-700 mt-0.5">Student: <strong>{effectiveFullName}</strong></p>
+                                            )}
+                                            {effectiveApaarId && (
+                                              <p className="font-mono font-extrabold text-[#00468E] text-sm tracking-[0.15em] mt-1">
+                                                {effectiveApaarId}
+                                              </p>
+                                            )}
+                                          </div>
+                                        </div>
+                                        {(effectiveLocalPdf || effectiveDocUrl) && (
+                                          <button type="button"
+                                            onClick={() => {
+                                              if (effectiveLocalPdf) {
+                                                viewPdf(effectiveLocalPdf, "APAAR");
+                                              } else {
+                                                window.open(effectiveDocUrl, "_blank", "noopener,noreferrer");
+                                              }
+                                            }}
+                                            className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-[7px] text-xs font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors">
+                                            <FaExternalLinkAlt className="text-[9px]" /> View APAAR Document
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {errMsg(errors["child" + index + "apaarId"])}
+                                </div>
+                              )}
+
+                              {child.hasApaarId === "no" && (
+                                <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2.5 flex items-start gap-2">
+                                  <AlertCircle className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                                  <p className="text-xs text-slate-600">
+                                    No APAAR ID noted. Your application will still be reviewed. APAAR ID helps speed up verification.
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Child school details */}
                               <div>
                                 <label className={lbl}>Full Name <span className="text-red-500 normal-case">*</span></label>
                                 <input type="text" name="fullName" placeholder="Child's full name" value={child.fullName}
@@ -1339,169 +1467,25 @@ export default function ParentRegistrationPage() {
                                   {errMsg(errors["child" + index + "schoolCity"])}
                                 </div>
                               </div>
-
-                              {/* APAAR yes/no question */}
-                              <div>
-                                <label className={lbl}>Does this child have an APAAR ID? <span className="text-red-500 normal-case">*</span></label>
-                                <div className="flex gap-3">
-                                  {(["yes", "no"] as const).map(val => (
-                                    <button key={val} type="button"
-                                      onClick={() => {
-                                        const nc = [...formData.children];
-                                        nc[index] = { ...nc[index], hasApaarId: val };
-                                        setFormData(p => ({ ...p, children: nc }));
-                                        if (errors["child" + index + "hasApaarId"]) setErrors(p => ({ ...p, ["child" + index + "hasApaarId"]: "" }));
-                                      }}
-                                      className={"flex-1 py-2.5 rounded-[8px] text-sm font-bold border-2 transition-all " + (
-                                        child.hasApaarId === val
-                                          ? val === "yes"
-                                            ? "bg-green-50 border-green-500 text-green-700"
-                                            : "bg-slate-100 border-slate-400 text-slate-700"
-                                          : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
-                                      )}>
-                                      {val === "yes" ? "Yes" : "No"}
-                                    </button>
-                                  ))}
-                                </div>
-                                {errMsg(errors["child" + index + "hasApaarId"])}
-                              </div>
-
-                              {/* APAAR verification block */}
-                              {child.hasApaarId === "yes" && (
-                                <div className="rounded-[10px] border border-blue-200 bg-blue-50/50 p-4 space-y-3">
-                                  <p className="text-xs font-bold text-blue-800 uppercase tracking-wide">APAAR ID Verification</p>
-
-                                  {!child.digilockerVerified ? (
-                                    <>
-                                      <div className="rounded-[8px] border border-dashed border-[#00468E]/30 bg-white p-3">
-                                        <div className="flex items-start gap-3">
-                                          <div className="w-8 h-8 rounded-[7px] flex items-center justify-center flex-shrink-0"
-                                            style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
-                                            <FaFingerprint className="text-white text-sm" />
-                                          </div>
-                                          <div className="flex-1">
-                                            <p className="font-bold text-slate-800 text-xs mb-0.5">Verify via DigiLocker</p>
-                                            <p className="text-[11px] text-slate-500 mb-2">
-                                              Fetch APAAR ID automatically from Academic Bank of Credits. The ID will appear instantly.
-                                            </p>
-                                            {(digiSt === "idle" || digiSt === "error") && (
-                                              <button type="button"
-                                                onClick={() => handleInitiateChildDigilocker(index)}
-                                                disabled={initiat}
-                                                className="inline-flex items-center gap-2 px-4 py-2 rounded-[7px] text-white text-xs font-bold transition-all active:scale-95 disabled:opacity-60"
-                                                style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
-                                                {initiat
-                                                  ? <><FaSpinner className="animate-spin" />Connecting...</>
-                                                  : <><FaFingerprint />Verify APAAR via DigiLocker</>}
-                                              </button>
-                                            )}
-                                            {digiSt === "initiated" && (
-                                              <p className="text-[11px] text-amber-600 font-medium flex items-center gap-1.5">
-                                                <FaSpinner className="animate-spin" /> Waiting for DigiLocker...
-                                              </p>
-                                            )}
-                                          </div>
-                                        </div>
-                                      </div>
-
-                                      <div className="relative">
-                                        <div className="absolute inset-0 flex items-center" aria-hidden>
-                                          <div className="w-full border-t border-slate-200" />
-                                        </div>
-                                        <div className="relative flex justify-center">
-                                          <span className="bg-blue-50/50 px-2 text-[10px] text-slate-400 font-medium uppercase tracking-widest">or enter manually</span>
-                                        </div>
-                                      </div>
-
-                                      <div>
-                                        <label className={lbl}>APAAR ID (12 digits)</label>
-                                        <input type="text" name="manualApaarId"
-                                          placeholder="Enter 12-digit APAAR ID"
-                                          value={child.manualApaarId}
-                                          onChange={e => handleInputChange(e, index)}
-                                          maxLength={12}
-                                          className={inp(errors["child" + index + "apaarId"]) + " font-mono tracking-widest"} />
-                                        {errMsg(errors["child" + index + "apaarId"])}
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="space-y-3">
-                                      <div className="flex items-center justify-between rounded-[8px] bg-green-50 border border-green-200 px-3 py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <FaCheckCircle className="text-green-500 flex-shrink-0" />
-                                          <div>
-                                            <p className="text-xs font-bold text-green-800">APAAR Verified via DigiLocker</p>
-                                            {child.digilockerFullName && (
-                                              <p className="text-[11px] text-green-700">Student: <strong>{child.digilockerFullName}</strong></p>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <button type="button"
-                                          className="text-[10px] text-slate-400 hover:text-slate-600 underline ml-3 flex-shrink-0"
-                                          onClick={() => {
-                                            const nc = [...formData.children];
-                                            nc[index] = { ...nc[index], digilockerVerified: false, digilockerStatus: "", digilockerClientId: "", apaarId: "", apaarLocalPdf: "" };
-                                            setFormData(p => ({ ...p, children: nc }));
-                                            setChildDigiData(prev => { const n = [...prev]; n[index] = null; return n; });
-                                            setChildDigiStatus(prev => { const n = [...prev]; n[index] = "idle"; return n; });
-                                            sessionStorage.removeItem("parent_child_digi_" + index);
-                                          }}>Re-verify</button>
-                                      </div>
-
-                                      {/* APAAR ID display — inline from PDF */}
-                                      <div className="rounded-[8px] border-2 border-blue-300 bg-blue-50 p-3">
-                                        <div className="flex items-start justify-between gap-3">
-                                          <div>
-                                            <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">APAAR ID (from PDF)</p>
-                                            {child.apaarId ? (
-                                              <p className="font-mono font-extrabold text-[#00468E] text-lg tracking-[0.2em]">
-                                                {child.apaarId}
-                                              </p>
-                                            ) : (
-                                              <p className="text-xs text-amber-700 font-medium">
-                                                APAAR ID not found in PDF. Enter manually below.
-                                              </p>
-                                            )}
-                                            <p className="text-[10px] text-slate-400 mt-1">Extracted from APAAR document — Read-only</p>
-                                          </div>
-                                          {child.apaarLocalPdf && (
-                                            <button type="button"
-                                              onClick={() => viewPdf(child.apaarLocalPdf, "APAAR")}
-                                              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] text-xs font-bold border border-blue-300 text-blue-700 bg-blue-100 hover:bg-blue-200">
-                                              <FaExternalLinkAlt className="text-[9px]" /> View PDF
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-
-                                      {!child.apaarId && (
-                                        <div>
-                                          <label className={lbl}>Enter APAAR ID Manually</label>
-                                          <input type="text" name="manualApaarId"
-                                            placeholder="Enter 12-digit APAAR ID"
-                                            value={child.manualApaarId}
-                                            onChange={e => handleInputChange(e, index)}
-                                            maxLength={12}
-                                            className={inp() + " font-mono tracking-widest"} />
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {child.hasApaarId === "no" && (
-                                <div className="rounded-[8px] border border-slate-200 bg-slate-50 px-3 py-2.5 flex items-start gap-2">
-                                  <AlertCircle className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
-                                  <p className="text-xs text-slate-600">
-                                    No APAAR ID noted. Your application will still be reviewed. APAAR ID helps speed up verification.
-                                  </p>
-                                </div>
-                              )}
                             </div>
                           </div>
                         );
                       })}
+
+                      {/* Add another child button — max 7 */}
+                      {formData.numberOfChildren < 7 && (
+                        <button type="button"
+                          onClick={() => {
+                            setFormData(p => ({ ...p, numberOfChildren: p.numberOfChildren + 1 }));
+                            setErrors({});
+                          }}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-[10px] border-2 border-dashed border-[#00468E]/30 text-[#00468E] text-sm font-bold hover:border-[#00468E]/60 hover:bg-[#00468E]/[0.03] transition-all">
+                          <span className="w-6 h-6 rounded-[6px] flex items-center justify-center text-white text-base font-extrabold flex-shrink-0"
+                            style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>+</span>
+                          Add Another Child
+                          <span className="text-[10px] font-normal text-slate-400">({formData.numberOfChildren}/7)</span>
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1509,6 +1493,126 @@ export default function ParentRegistrationPage() {
                   {currentStep === 3 && (
                     <div className="space-y-4">
                       <p className="text-sm text-slate-500">Tell us about your financial situation so we can best support your family.</p>
+
+                      {/* ── Email verification (moved from Step 1) ── */}
+                      <div className="rounded-[10px] border-2 border-slate-200 overflow-hidden">
+                        <div className="px-4 py-2.5 border-b border-slate-200"
+                          style={{ background: "linear-gradient(135deg,#f8fafc,#f1f5f9)" }}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Mail className="h-4 w-4 text-[#00468E]" />
+                              <span className="text-xs font-bold text-slate-700 uppercase tracking-widest">
+                                Email Verification <span className="text-red-500 normal-case font-normal">*</span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {emailStatus === "checking" && (
+                                <span className="flex items-center gap-1 text-[10px] text-slate-400 font-medium">
+                                  <Loader2 className="h-3 w-3 animate-spin" /> Checking...
+                                </span>
+                              )}
+                              {isEmailVerified && (
+                                <>
+                                  <span className="text-[10px] font-bold text-green-700 bg-green-100 border border-green-300 px-1.5 py-0.5 rounded-[4px] flex items-center gap-1">
+                                    <CheckCircle2 className="h-3 w-3" /> Verified
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEmailStatus("idle");
+                                      setEmailBlockReason("");
+                                      setOtpValue("");
+                                      lastCheckedEmail.current = "";
+                                      setFormData(prev => ({ ...prev, email: "" }));
+                                    }}
+                                    className="text-[10px] font-bold text-[#00468E] bg-blue-50 border border-blue-200 hover:bg-blue-100 px-1.5 py-0.5 rounded-[4px] transition-colors">
+                                    Change Email
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-4">
+                          <input type="email" name="email" placeholder="your.email@example.com"
+                            value={formData.email} onChange={handleInputChange}
+                            {...lockProps(isEmailVerified)}
+                            className={
+                              isEmailVerified ? inpLocked :
+                              emailStatus === "blocked"
+                                ? "w-full px-3 py-2.5 rounded-[8px] border text-sm font-medium outline-none border-red-400 bg-red-50 text-red-900 placeholder-red-300"
+                                : inp(errors.email)
+                            }
+                          />
+
+                          {/* Blocked */}
+                          {emailStatus === "blocked" && (
+                            <div className="mt-2 rounded-[8px] border border-red-200 bg-red-50 px-3 py-2 flex items-start gap-2">
+                              <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />
+                              <p className="text-xs text-red-700 font-medium">{emailBlockReason}</p>
+                            </div>
+                          )}
+
+                          {/* New email → send OTP */}
+                          {emailStatus === "new_email" && (
+                            <div className="mt-2 rounded-[8px] border border-blue-200 bg-blue-50 px-3 py-2 flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Mail className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                <p className="text-xs text-blue-800 font-medium truncate">Verify your email via OTP</p>
+                              </div>
+                              <button type="button" onClick={handleSendOtp} disabled={otpLoading}
+                                className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-[6px] text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                                style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>
+                                {otpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Send OTP"}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* OTP input */}
+                          {emailStatus === "otp_sent" && (
+                            <div className="mt-2 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-3 space-y-2">
+                              <p className="text-xs font-bold text-amber-800 flex items-center gap-1.5">
+                                <Mail className="h-3.5 w-3.5" /> OTP sent. Enter the 6-digit code:
+                              </p>
+                              <div className="flex flex-col gap-2">
+                                <div className="flex items-center gap-2">
+                                  <input type="text" placeholder="000000" value={otpValue}
+                                    onChange={e => setOtpValue(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                                    maxLength={6}
+                                    className="flex-1 min-w-0 px-3 py-2 rounded-[6px] border border-amber-300 bg-white text-sm font-mono font-bold text-slate-800 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 tracking-[0.3em]" />
+                                  <button type="button" onClick={handleVerifyOtp}
+                                    disabled={otpLoading || otpValue.length !== 6}
+                                    className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-[6px] text-xs font-bold text-white transition-all active:scale-95 disabled:opacity-50"
+                                    style={{ background: "linear-gradient(135deg,#0cab47,#08d451)" }}>
+                                    {otpLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "Verify OTP"}
+                                  </button>
+                                </div>
+                                <button type="button" onClick={handleSendOtp} disabled={otpLoading}
+                                  className="self-start text-xs text-slate-500 hover:text-[#00468E] font-medium underline disabled:opacity-50 transition-colors">
+                                  Did not receive it? Resend OTP
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Verified — success row */}
+                          {isEmailVerified && (
+                            <div className="mt-2 rounded-[8px] border border-green-200 bg-green-50 px-3 py-2 flex items-center gap-2">
+                              <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                              <p className="text-xs text-green-700 font-medium">{formData.email} — email verified</p>
+                            </div>
+                          )}
+
+                          {(errors.email || errors.email_verify) && emailStatus !== "blocked" && !isEmailVerified && (
+                            <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3 shrink-0" />
+                              {errors.email || errors.email_verify}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                         <div>
                           <label className={lbl}>Total Fee Amount (Rs.) <span className="text-red-500 normal-case">*</span></label>
@@ -1636,7 +1740,9 @@ export default function ParentRegistrationPage() {
                         <div className="p-3 space-y-2">
                           {Array.from({length:formData.numberOfChildren}).map((_,i) => {
                             const c = formData.children[i];
-                            const effectiveApaarId = c.apaarId || c.manualApaarId || null;
+                            const sd = childDigiData[i];
+                            const effectiveApaarId = c.apaarId || sd?.apaarId || c.manualApaarId || null;
+                            const isChildVerified  = c.digilockerVerified || childDigiStatus[i] === "completed" || !!sd;
                             return (
                               <div key={i} className="bg-slate-50 rounded-[10px] p-3 border border-slate-200">
                                 <div className="flex items-center justify-between mb-1.5">
@@ -1645,7 +1751,7 @@ export default function ParentRegistrationPage() {
                                       style={{ background: "linear-gradient(135deg,#00468E,#0058B4)" }}>{i+1}</span>
                                     <span className="font-bold text-slate-800 text-sm">{c.fullName}</span>
                                   </div>
-                                  {c.digilockerVerified && (
+                                  {isChildVerified && (
                                     <span className="text-[10px] font-bold text-green-600 flex items-center gap-1">
                                       <FaCheckDouble className="text-[9px]" />APAAR Verified
                                     </span>
@@ -1659,11 +1765,13 @@ export default function ParentRegistrationPage() {
                                       <span className="text-slate-400">APAAR:</span>
                                       <strong className="text-[#00468E] font-mono">{effectiveApaarId}</strong>
                                     </span>
+                                  ) : isChildVerified ? (
+                                    <span className="text-green-600 font-bold text-[11px] flex items-center gap-1">
+                                      <FaCheckDouble className="text-[9px]" />APAAR Verified
+                                    </span>
                                   ) : c.hasApaarId === "no" ? (
                                     <span className="text-slate-400 italic">No APAAR ID</span>
-                                  ) : (
-                                    <span className="text-amber-600 italic text-[11px]">APAAR not verified</span>
-                                  )}
+                                  ) : null}
                                 </div>
                               </div>
                             );

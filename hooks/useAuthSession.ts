@@ -4,7 +4,11 @@ export interface UserSession {
   id: string;
   fullName: string;
   email: string;
+  phone?: string | null;
+  role?: string | null;
+  waitlistStatus?: string | null;
   createdAt: string;
+  authType?: "waitlist" | "public";
 }
 
 export function useAuthSession() {
@@ -31,7 +35,6 @@ export function useAuthSession() {
   useEffect(() => {
     fetchProfile();
 
-    // Listen for auth state changes fired by login / logout / register
     const handler = () => fetchProfile();
     window.addEventListener("auth-change", handler);
     return () => window.removeEventListener("auth-change", handler);
@@ -44,7 +47,6 @@ export function useAuthSession() {
       console.error("Logout API error:", err);
     } finally {
       setUser(null);
-      // Broadcast to all mounted components
       window.dispatchEvent(new Event("auth-change"));
     }
   };

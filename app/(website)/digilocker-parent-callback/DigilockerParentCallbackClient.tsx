@@ -6,14 +6,17 @@ import { FaCheckCircle, FaTimesCircle, FaSpinner, FaIdCard } from "react-icons/f
 
 // DigiLocker callback page for parent registration.
 //
-// TWO MODES (determined by ?flow= param set before redirect):
+// TWO MODES (determined by localStorage "parent_digilocker_flow" set before redirect):
 //   flow=parent  → Fetch parent's own Aadhaar XML + PAN via teacher-fetch-docs
-//                  Stores result in sessionStorage as "parent_digilocker_result"
+//                  Stores result in localStorage as "parent_digilocker_result"
 //   flow=child   → Fetch child's APAAR doc via parent-fetch-docs
-//                  Stores result in sessionStorage as "parent_digilocker_result_for_child"
+//                  Stores result ONLY in "parent_digilocker_result_for_child"
+//                  NEVER writes to "parent_digilocker_result" (parent KYC key)
 //
-// The flow param is saved to sessionStorage before redirect because Surepass
-// strips custom query params on callback — we read it back from sessionStorage.
+// localStorage is used (vs sessionStorage) so data survives hard refresh and
+// tab close/reopen, preserving the full form session until submission.
+// The flow param is saved to localStorage before redirect because Surepass
+// strips custom query params on callback — we read it back from localStorage.
 
 export default function DigilockerParentCallbackClient() {
   const router = useRouter();
@@ -38,10 +41,10 @@ export default function DigilockerParentCallbackClient() {
     }
 
     fetchedRef.current = true;
-    sessionStorage.setItem("parent_digilocker_client_id", clientId);
+    localStorage.setItem("parent_digilocker_client_id", clientId);
 
-    // Determine flow: read from sessionStorage (set before redirect)
-    const flow = sessionStorage.getItem("parent_digilocker_flow") || "parent";
+    // Determine flow: read from localStorage (set before redirect)
+    const flow = localStorage.getItem("parent_digilocker_flow") || "parent";
 
     if (flow === "child") {
       fetchChildApaar(clientId);
@@ -68,8 +71,14 @@ export default function DigilockerParentCallbackClient() {
         throw new Error(data.error || "Failed to fetch DigiLocker documents. Please try again.");
       }
 
-      // Store parent KYC result — same shape as teacher
-      sessionStorage.setItem("parent_digilocker_result", JSON.stringify({
+      // panNoPan: true when DigiLocker completed successfully but no PAN was found.
+      // This lets the form show a manual PAN entry field instead of blocking submission.
+      const panNoPan = !data.panNumber && !data.panLocalPdf;
+
+      // Store parent KYC result — same shape as teacher + panNoPan flag.
+      // "parent_digilocker_result" is the exclusive key for parent KYC.
+      // The child APAAR flow must NEVER write to this key.
+      localStorage.setItem("parent_digilocker_result", JSON.stringify({
         clientId,
         fullName:        data.fullName        || null,
         dob:             data.dob             || null,
@@ -83,14 +92,14 @@ export default function DigilockerParentCallbackClient() {
         panNumber:       data.panNumber       || null,
         panFullName:     data.panFullName     || null,
         panDob:          data.panDob          || null,
+        panNoPan,
         mobileNumber:    data.mobileNumber    || null,
         aadhaarLocalPdf: data.aadhaarLocalPdf || null,
         panLocalPdf:     data.panLocalPdf     || null,
-        apaarLocalPdf:   data.apaarLocalPdf   || null,
-        documents:       data.documents       || [],
       }));
 
-      sessionStorage.removeItem("parent_digilocker_flow");
+      // Clear flow key so a fresh session starts clean
+      localStorage.removeItem("parent_digilocker_flow");
 
       const summaryData: Record<string, string> = {};
       if (data.fullName)      summaryData["Name"]        = data.fullName;
@@ -115,6 +124,10 @@ export default function DigilockerParentCallbackClient() {
   };
 
   // ── Child APAAR: via parent-fetch-docs ─────────────────────────────────
+  // CRITICAL: This function must NEVER write to "parent_digilocker_result".
+  // That key belongs exclusively to the parent KYC flow. Writing child APAAR
+  // data there would silently overwrite the parent's Aadhaar autofill data,
+  // causing all parent fields to reset on every child verification.
   const fetchChildApaar = async (clientId: string) => {
     try {
       setHeadline("Fetching Child APAAR Document");
@@ -131,37 +144,38 @@ export default function DigilockerParentCallbackClient() {
         throw new Error(data.error || "Failed to fetch APAAR document. Please try again.");
       }
 
-      // Store the complete result for the form to read
-      sessionStorage.setItem("parent_digilocker_result", JSON.stringify({
+      // Build the child result object.
+      // apaarDocUrl is stored as fallback for viewing when the server-side PDF
+      // save fails (apaarLocalPdf === null). It is a pre-signed S3 URL (10 min TTL)
+      // used only for immediate in-session viewing — not stored long-term.
+      const childResult = {
         clientId,
-        apaarId:       data.apaarId       || null,
-        fullName:      data.fullName      || null,
-        dateOfBirth:   data.dateOfBirth   || null,
-        gender:        data.gender        || null,
-        apaarLocalPdf: data.apaarLocalPdf || null,
-        noApaarDoc:    data.noApaarDoc    || false,
-        documents:     data.documents     || [],
-      }));
+        apaarId:        data.apaarId        || null,
+        fullName:       data.fullName       || null,
+        dateOfBirth:    data.dateOfBirth    || null,
+        gender:         data.gender         || null,
+        apaarLocalPdf:  data.apaarLocalPdf  || null,
+        apaarDocUrl:    data.apaarDownloadUrl || null,
+        noApaarDoc:     data.noApaarDoc     || false,
+      };
 
-      // Also store indexed result for the specific child
-      const pendingStr = sessionStorage.getItem("parent_digilocker_pending_child");
+      // Store the indexed child result using the pending-child record.
+      // Do NOT touch "parent_digilocker_result" — that is the parent KYC key.
+      const pendingStr = localStorage.getItem("parent_digilocker_pending_child");
       if (pendingStr) {
-        const pending = JSON.parse(pendingStr);
-        sessionStorage.setItem("parent_digilocker_result_for_child", JSON.stringify({
-          ...pending,
-          result: {
-            clientId,
-            apaarId:       data.apaarId       || null,
-            fullName:      data.fullName      || null,
-            dateOfBirth:   data.dateOfBirth   || null,
-            gender:        data.gender        || null,
-            apaarLocalPdf: data.apaarLocalPdf || null,
-            noApaarDoc:    data.noApaarDoc    || false,
-          },
-        }));
+        try {
+          const pending = JSON.parse(pendingStr);
+          localStorage.setItem("parent_digilocker_result_for_child", JSON.stringify({
+            ...pending,
+            result: childResult,
+          }));
+        } catch {
+          console.error("[ParentCallback] Could not parse pending child data");
+        }
       }
 
-      sessionStorage.removeItem("parent_digilocker_flow");
+      // Clear flow key
+      localStorage.removeItem("parent_digilocker_flow");
 
       const summaryData: Record<string, string> = {};
       if (data.fullName) summaryData["Student Name"] = data.fullName;
@@ -227,7 +241,7 @@ export default function DigilockerParentCallbackClient() {
               </div>
             ))}
             <div className="pt-1 border-t border-green-200">
-              <p className="text-xs text-green-600 font-medium">✅ Data fetched from DigiLocker</p>
+              <p className="text-xs text-green-600 font-medium">Data fetched from DigiLocker</p>
             </div>
           </div>
         )}

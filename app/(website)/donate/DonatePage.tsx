@@ -69,7 +69,8 @@ const INDIAN_STATES = [
   "Delhi","Jammu and Kashmir","Ladakh","Lakshadweep","Puducherry",
 ]
 
-const RAZORPAY_KEY = "rzp_test_SNWMyYGGnFaJ0I"
+// ── Key loaded from .env — change only NEXT_PUBLIC_RAZORPAY_KEY_ID in .env
+const RAZORPAY_KEY = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!
 
 function validateForm(form: FormData, amount: number): FormErrors {
   const errors: FormErrors = {}

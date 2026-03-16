@@ -11,12 +11,11 @@ import { useAuthSession } from "@/hooks/useAuthSession";
 import {
   User, GraduationCap, Briefcase, ClipboardCheck,
   AlertCircle, CheckCircle2, ChevronRight, Shield,
-  Loader2, Mail, Save, Send, PartyPopper,
+  Loader2, Mail,
 } from "lucide-react";
 
 declare global { interface Window { Razorpay: any; } }
-// ── Key loaded from .env — change only NEXT_PUBLIC_RAZORPAY_KEY_ID in .env
-const RAZORPAY_KEY_ID = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!;
+const RAZORPAY_KEY_ID = "rzp_test_SNWMyYGGnFaJ0I";
 const SESSION_KEY = "teacher_reg_progress";
 const DIGI_SESSION_KEY = "teacher_digilocker_result";
 
@@ -773,10 +772,10 @@ export default function TeacherRegistrationPage() {
   const progress = ((currentStep - 1) / (steps.length - 1)) * 100;
 
   const redirectMessages = [
-    { icon: <CheckCircle2 className="w-8 h-8 text-white" />,  title: "Payment confirmed",       sub: "Your payment of Rs.111 was received"          },
-    { icon: <Save        className="w-8 h-8 text-white" />,   title: "Saving your details",     sub: "Storing your registration securely"            },
-    { icon: <Send        className="w-8 h-8 text-white" />,   title: "Sending confirmation",    sub: "Emailing your dashboard access link"           },
-    { icon: <PartyPopper className="w-8 h-8 text-white" />,   title: "Registration complete!",  sub: "Taking you to your confirmation page..."       },
+    { icon: "✓", title: "Payment confirmed",        sub: "Your payment of Rs.111 was received"          },
+    { icon: "📋", title: "Saving your details",     sub: "Storing your registration securely"            },
+    { icon: "📧", title: "Sending confirmation",    sub: "Emailing your dashboard access link"           },
+    { icon: "🎉", title: "Registration complete!",  sub: "Taking you to your confirmation page..."       },
   ];
 
   return (
@@ -795,7 +794,7 @@ export default function TeacherRegistrationPage() {
               <div className="w-24 h-24 rounded-full border-4 border-white/10" />
               <div className="absolute inset-0 w-24 h-24 rounded-full border-4 border-transparent border-t-[#F4951D] border-r-white/40 animate-spin" />
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="flex items-center justify-center">{redirectMessages[redirectStep]?.icon}</span>
+                <span className="text-3xl">{redirectMessages[redirectStep]?.icon}</span>
               </div>
             </div>
 

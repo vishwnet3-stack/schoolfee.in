@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAdminAuth, ROLE_HOME } from "./AdminAuthContext";
+import { useAdminAuth, ROLE_HOME } from "./Adminauthcontext";
 
 export default function AdminRootPage() {
   const { user, loading } = useAdminAuth();
