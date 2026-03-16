@@ -80,5 +80,5 @@ docker-compose.override.yml
 # private uploads
 /private-uploads/
 
-# public files
-/public/
+# ignore dynamic uploads
+/public/uploads/
