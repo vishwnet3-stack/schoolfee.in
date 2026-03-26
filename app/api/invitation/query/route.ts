@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       }) : Promise.resolve(),
       
       // Send notification to ADMIN
-      sendEmail('vishwnet.schoolfee@gmail.com', 'queryNotificationWithEmail', {
+      sendEmail('schoolfee.in@gmail.com', 'queryNotificationWithEmail', {
         query: query.trim(),
         email: email || 'Not provided',
       }),

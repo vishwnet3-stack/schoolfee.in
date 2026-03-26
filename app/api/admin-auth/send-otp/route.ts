@@ -6,8 +6,8 @@ import crypto from "crypto";
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "vishwnet.schoolfee@gmail.com",
-    pass: "jjoa hcgw gwyz cnvt",
+    user: "schoolfee.in@gmail.com",
+    pass: "rycwxowlurrojhqq",
   },
 });
 
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       user.role === "teacher" ? "Teacher" : "School";
 
     await transporter.sendMail({
-      from: '"Schoolfee Dashboard" <vishwnet.schoolfee@gmail.com>',
+      from: '"Schoolfee Dashboard" <schoolfee.in@gmail.com>',
       to: normalizedEmail,
       subject: "Your Schoolfee Dashboard Login OTP",
       html: `

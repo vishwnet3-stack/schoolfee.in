@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
 
     // 6. Admin alert
     try {
-      await sendEmail("vishwnet.schoolfee@gmail.com", "teacherRegistrationAdminAlert", {
+      await sendEmail("schoolfee.in@gmail.com", "teacherRegistrationAdminAlert", {
         name:           formData.full_name,
         email:          normalizedEmail,
         phone:          formData.phone,

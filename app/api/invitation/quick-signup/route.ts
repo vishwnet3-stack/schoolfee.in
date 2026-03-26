@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Send notification email to admin (async)
-    sendEmail('vishwnet.schoolfee@gmail.com', 'quickSignupNotification', {
+    sendEmail('schoolfee.in@gmail.com', 'quickSignupNotification', {
       mobile,
       source,
     }).catch((error) => {

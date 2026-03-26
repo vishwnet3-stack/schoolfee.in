@@ -4,9 +4,13 @@ import crypto from "crypto";
 import { db } from "@/lib/db";
 import { sendEmail } from "@/lib/mailer";
 
-// ── Secret loaded from .env — change only .env to switch test ↔ live
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET!;
-const ADMIN_EMAIL         = "vishwnet.schoolfee@gmail.com";
+const ADMIN_EMAIL         = "schoolfee.in@gmail.com";
+
+// ── PAN is ONLY mandatory for donations STRICTLY ABOVE ₹2,000 ────────────────
+// Exactly ₹2,000 does NOT require PAN.
+// This matches Income Tax circular: PAN required only when donation EXCEEDS ₹2,000.
+const PAN_MANDATORY_ABOVE = 2000; // strictly greater than
 
 function verifySignature(orderId: string, paymentId: string, signature: string): boolean {
   const body     = `${orderId}|${paymentId}`;
@@ -54,7 +58,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Missing required payment fields." }, { status: 400 });
   }
 
-  // 1. Signature verification
+  // ── 1. Verify Razorpay HMAC signature ─────────────────────────────────────
   if (!verifySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature)) {
     try {
       await db.execute(
@@ -65,40 +69,57 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: false, error: "Payment verification failed. Possible tampering detected." }, { status: 400 });
   }
 
-  // 2. Server-side amount check
-  let expectedAmountPaise: number | null = null;
+  // ── 2. Validate amount ─────────────────────────────────────────────────────
+  const submittedAmountINR   = Number(formData.donationAmount);
+  const submittedAmountPaise = submittedAmountINR * 100;
+
+  if (!submittedAmountINR || submittedAmountINR < 100 || submittedAmountINR > 1_000_000) {
+    return NextResponse.json({ success: false, error: "Invalid donation amount." }, { status: 400 });
+  }
+
+  // Optional: check against pre-stored expected amount (if order was pre-inserted)
   try {
     const [rows]: any = await db.execute(
       `SELECT expected_amount_paise FROM donations WHERE razorpay_order_id = ? AND payment_status = 'pending' LIMIT 1`,
       [razorpay_order_id]
     );
-    if (rows.length > 0) expectedAmountPaise = rows[0].expected_amount_paise;
-  } catch (_) {}
-
-  const submittedAmountINR   = Number(formData.donationAmount);
-  const submittedAmountPaise = submittedAmountINR * 100;
-
-  if (expectedAmountPaise !== null && expectedAmountPaise !== submittedAmountPaise) {
-    try {
-      await db.execute(
-        `INSERT INTO donation_payment_attempts (razorpay_order_id, razorpay_payment_id, attempt_status, amount_paise, failure_reason, ip_address) VALUES (?,?,?,?,?,?)`,
-        [razorpay_order_id, razorpay_payment_id, "tampered", submittedAmountPaise,
-         `Amount mismatch: expected ${expectedAmountPaise} paise, got ${submittedAmountPaise} paise`, ip]
-      );
-    } catch (_) {}
-    return NextResponse.json({ success: false, error: "Donation amount mismatch. Transaction rejected." }, { status: 400 });
+    if (rows.length > 0 && rows[0].expected_amount_paise !== null) {
+      const expectedPaise = rows[0].expected_amount_paise;
+      if (expectedPaise !== submittedAmountPaise) {
+        return NextResponse.json({ success: false, error: "Donation amount mismatch. Transaction rejected." }, { status: 400 });
+      }
+    }
+    // If no pre-existing record, we trust Razorpay's verified signature (fine)
+  } catch (_) {
+    // DB check failed non-fatally — continue
   }
 
-  if (submittedAmountINR < 100 || submittedAmountINR > 1_000_000) {
-    return NextResponse.json({ success: false, error: "Invalid donation amount." }, { status: 400 });
+  // ── 3. PAN validation ──────────────────────────────────────────────────────
+  const panRaw   = str(formData.panNumber);
+  const panValue = panRaw.length > 0 ? panRaw.toUpperCase() : null;
+
+  // PAN mandatory ONLY when amount is STRICTLY MORE THAN ₹2,000 (i.e. >= ₹2,001)
+  if (submittedAmountINR > PAN_MANDATORY_ABOVE && !panValue) {
+    return NextResponse.json({
+      success: false,
+      error: `PAN number is required for donations above ₹${PAN_MANDATORY_ABOVE.toLocaleString("en-IN")} (Income Tax Section 80G).`,
+    }, { status: 400 });
   }
 
-  // 3. Safe field values
-  const cityValue  = str(formData.city) || str(formData.state) || "—";
-  const panRaw     = str(formData.panNumber);
-  const panValue   = panRaw.length > 0 ? panRaw.toUpperCase() : null;
+  // Validate PAN format if provided
+  if (panValue && !/^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(panValue)) {
+    return NextResponse.json({
+      success: false,
+      error: "Invalid PAN format. Expected format: ABCDE1234F",
+    }, { status: 400 });
+  }
 
-  // 4. Save / update donation record
+  // ── 4. Safe field extraction ───────────────────────────────────────────────
+  const cityValue = str(formData.city) || str(formData.state) || "—";
+  // Use empty string for pan if null — DB column will be altered to allow NULL/empty below
+  const panDbValue = panValue ?? ""; // store empty string if no PAN (below ₹2,001)
+
+  // ── 5. Save / upsert donation record ──────────────────────────────────────
   let donationId: number;
   try {
     const [existing]: any = await db.execute(
@@ -112,11 +133,26 @@ export async function POST(request: NextRequest) {
            razorpay_payment_id = ?, razorpay_signature = ?,
            payment_status = 'paid', verified_amount_paise = ?,
            payment_captured_at = NOW(), status = 'confirmed',
+           pan_number = ?,
+           first_name = ?, last_name = ?, email = ?, phone = ?,
+           address = ?, city = ?, state = ?, pincode = ?,
+           is_anonymous = ?, message = ?,
+           organization_name = ?, organization_type = ?, gstin = ?,
            ip_address = ?, user_agent = ?
          WHERE id = ?`,
-        [razorpay_payment_id, razorpay_signature, submittedAmountPaise, ip, userAgent, donationId]
+        [
+          razorpay_payment_id, razorpay_signature, submittedAmountPaise,
+          panDbValue,
+          str(formData.firstName), str(formData.lastName), str(formData.email), str(formData.phone),
+          str(formData.address), cityValue, str(formData.state), str(formData.pincode, "000000"),
+          formData.isAnonymous ? 1 : 0, strOrNull(formData.message),
+          strOrNull(formData.organizationName), str(formData.organizationType, "individual"), strOrNull(formData.gstin),
+          ip, userAgent,
+          donationId
+        ]
       );
     } else {
+      // Fresh INSERT — pan_number stored as empty string when not provided
       const [result]: any = await db.execute(
         `INSERT INTO donations (
            first_name, last_name, email, phone, pan_number,
@@ -124,16 +160,16 @@ export async function POST(request: NextRequest) {
            address, city, state, pincode,
            donation_amount, donation_purpose, is_anonymous, message,
            razorpay_order_id, razorpay_payment_id, razorpay_signature,
-           payment_status, payment_method, payment_captured_at,
+           payment_status, payment_captured_at,
            expected_amount_paise, verified_amount_paise,
            status, ip_address, user_agent
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?,?,?,?)`,
+         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),?,?,?,?,?)`,
         [
           str(formData.firstName),
           str(formData.lastName),
           str(formData.email),
           str(formData.phone),
-          panValue,
+          panDbValue,                                        // "" when no PAN — avoids NOT NULL error
           strOrNull(formData.organizationName),
           str(formData.organizationType, "individual"),
           strOrNull(formData.gstin),
@@ -147,7 +183,6 @@ export async function POST(request: NextRequest) {
           strOrNull(formData.message),
           razorpay_order_id, razorpay_payment_id, razorpay_signature,
           "paid",
-          strOrNull(formData.paymentMethod),
           submittedAmountPaise,
           submittedAmountPaise,
           "confirmed", ip, userAgent,
@@ -156,11 +191,15 @@ export async function POST(request: NextRequest) {
       donationId = result.insertId;
     }
   } catch (dbError: any) {
-    console.error("DB save error:", dbError);
-    return NextResponse.json({ success: false, error: "Failed to record donation. Please contact support." }, { status: 500 });
+    console.error("[Donation DB Error]", dbError?.message, dbError?.code);
+    // Return detailed error in dev, generic in prod
+    const msg = process.env.NODE_ENV === "development"
+      ? `DB error: ${dbError?.message}`
+      : "Failed to record donation. Please contact support.";
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 
-  // 5. Generate 80G receipt number
+  // ── 6. Generate receipt number & financial year ────────────────────────────
   const receiptNumber = generateReceiptNumber(donationId);
   const now           = new Date();
   const fy            = now.getMonth() >= 3
@@ -173,7 +212,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (_) {}
 
-  // 6. Log successful attempt
+  // ── 7. Log successful attempt ──────────────────────────────────────────────
   try {
     await db.execute(
       `INSERT INTO donation_payment_attempts (donation_id, razorpay_order_id, razorpay_payment_id, attempt_status, amount_paise, ip_address) VALUES (?,?,?,?,?,?)`,
@@ -183,36 +222,42 @@ export async function POST(request: NextRequest) {
 
   const donorName = `${str(formData.firstName)} ${str(formData.lastName)}`.trim() || "Donor";
 
-  // 7. Email to donor
+  // ── 8. Email to donor (non-fatal) ──────────────────────────────────────────
   try {
     await sendEmail(formData.email, "donationConfirmation", {
       name: donorName, donationId, receiptNumber,
       paymentId: razorpay_payment_id, donationAmount: submittedAmountINR,
       financialYear: fy, panNumber: panValue || "N/A",
-      address: formData.address, city: cityValue,
-      state: formData.state, pincode: formData.pincode,
+      address: str(formData.address), city: cityValue,
+      state: str(formData.state), pincode: str(formData.pincode),
       organizationName: strOrNull(formData.organizationName),
       isAnonymous: !!formData.isAnonymous,
     });
   } catch (e) { console.error("Donor email failed (non-fatal):", e); }
 
-  // 8. Admin notification
+  // ── 9. Admin notification (non-fatal) ─────────────────────────────────────
   try {
     await sendEmail(ADMIN_EMAIL, "donationAdminAlert", {
-      name: donorName, email: formData.email, phone: formData.phone,
+      name: donorName, email: str(formData.email), phone: str(formData.phone),
       donationId, receiptNumber, paymentId: razorpay_payment_id,
       donationAmount: submittedAmountINR, panNumber: panValue || "N/A",
-      city: cityValue, state: formData.state,
+      city: cityValue, state: str(formData.state),
       organizationName: strOrNull(formData.organizationName),
       organizationType: str(formData.organizationType, "individual"),
       isAnonymous: !!formData.isAnonymous,
     });
   } catch (e) { console.error("Admin email failed (non-fatal):", e); }
 
-  return NextResponse.json({ success: true, donationId, receiptNumber, financialYear: fy, message: "Donation recorded successfully. Thank you!" });
+  return NextResponse.json({
+    success: true,
+    donationId,
+    receiptNumber,
+    financialYear: fy,
+    message: "Donation recorded successfully. Thank you!",
+  });
 }
 
-// Failure tracking endpoint — called by frontend when Razorpay modal reports a failure
+// ── PUT: Failure tracking (called by frontend when Razorpay reports failure) ──
 export async function PUT(request: NextRequest) {
   const ip = getClientIP(request);
   try {
@@ -221,11 +266,11 @@ export async function PUT(request: NextRequest) {
       await db.execute(
         `UPDATE donations SET payment_status = 'failed', status = 'cancelled' WHERE razorpay_order_id = ?`,
         [razorpay_order_id]
-      );
+      ).catch(() => {});
       await db.execute(
         `INSERT INTO donation_payment_attempts (razorpay_order_id, attempt_status, amount_paise, failure_reason, ip_address) VALUES (?,?,?,?,?)`,
         [razorpay_order_id, "failed", amount_paise || 0, error_description || "User-reported failure", ip]
-      );
+      ).catch(() => {});
     }
     return NextResponse.json({ success: true });
   } catch (e: any) {

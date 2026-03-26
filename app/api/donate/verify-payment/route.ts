@@ -15,13 +15,13 @@ async function getDb() {
 }
 
 function getMailer() {
+  const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+  const gmailPass = (process.env.GMAIL_PASS || process.env.SMTP_PASS || "").replace(/\s/g, "");
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || "smtp.gmail.com",
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: Number(process.env.SMTP_PORT) === 465,
+    service: "gmail",
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
+      user: gmailUser,
+      pass: gmailPass,
     },
   });
 }
@@ -55,13 +55,18 @@ function buildReceiptData(row: any) {
 
 // ── Email: donor receipt ───────────────────────────────────────────────────────
 async function sendDonorEmail(r: ReturnType<typeof buildReceiptData>) {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return;
+  const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+  const gmailPass = process.env.GMAIL_PASS || process.env.SMTP_PASS;
+  if (!gmailUser || !gmailPass) {
+    console.error("[EMAIL] GMAIL_USER or GMAIL_PASS not set in .env");
+    return;
+  }
   const mailer = getMailer();
   const paidDate = new Date(r.paid_at).toLocaleString("en-IN", {
     dateStyle: "long", timeStyle: "short",
   });
   const fromName = process.env.SMTP_FROM_NAME || "Schoolfee.in";
-  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const fromEmail = gmailUser;
 
   await mailer.sendMail({
     from: `"${fromName}" <${fromEmail}>`,
@@ -116,10 +121,12 @@ async function sendDonorEmail(r: ReturnType<typeof buildReceiptData>) {
 
 // ── Email: admin notification ──────────────────────────────────────────────────
 async function sendAdminEmail(r: ReturnType<typeof buildReceiptData>) {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return;
+  const gmailUser = process.env.GMAIL_USER || process.env.SMTP_USER;
+  const gmailPass = process.env.GMAIL_PASS || process.env.SMTP_PASS;
+  if (!gmailUser || !gmailPass) return;
   const mailer = getMailer();
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || "admin@schoolfee.in";
-  const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || gmailUser;
+  const fromEmail = gmailUser;
 
   await mailer.sendMail({
     from: `"Schoolfee Donations" <${fromEmail}>`,
@@ -250,3 +257,39 @@ export async function POST(req: NextRequest) {
     await db.end();
   }
 }
+/**
+ * PUT /api/donate/verify-payment
+ * Records a Razorpay payment failure against the pending order.
+ */
+export async function PUT(req: NextRequest) {
+  const db = await getDb();
+  try {
+    let body: any;
+    try { body = await req.json(); } catch {
+      return NextResponse.json({ success: false, message: "Invalid body." }, { status: 400 });
+    }
+
+    const { razorpay_order_id, db_order_id, error_description } = body;
+
+    if (db_order_id) {
+      await db.query(
+        `UPDATE donation_payments SET status='failed',
+         error_description=?, updated_at=NOW() WHERE id=?`,
+        [error_description || "Payment failed", db_order_id]
+      ).catch(() => {});
+    } else if (razorpay_order_id) {
+      await db.query(
+        `UPDATE donation_payments SET status='failed',
+         error_description=?, updated_at=NOW() WHERE razorpay_order_id=?`,
+        [error_description || "Payment failed", razorpay_order_id]
+      ).catch(() => {});
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("[/api/donate/verify-payment PUT]", err);
+    return NextResponse.json({ success: false }, { status: 500 });
+  } finally {
+    await db.end();
+  }
+} 

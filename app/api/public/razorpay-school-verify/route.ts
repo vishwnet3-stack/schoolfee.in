@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     } catch (e) { console.error("School confirmation email failed (non-fatal):", e); }
 
     try {
-      await sendEmail("vishwnet.schoolfee@gmail.com", "schoolRegistrationAdminAlert", {
+      await sendEmail("schoolfee.in@gmail.com", "schoolRegistrationAdminAlert", {
         schoolName: formData.school_name, schoolType: formData.school_type,
         registrationId, paymentId: razorpay_payment_id,
         principalName: formData.principal_name, email: formData.official_email,

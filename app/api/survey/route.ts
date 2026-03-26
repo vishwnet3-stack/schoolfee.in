@@ -311,7 +311,7 @@ export async function POST(request: NextRequest) {
       }),
       
       // Send notification to ADMIN with ALL survey data
-      sendEmail('vishwnet.schoolfee@gmail.com', 'surveyAdminNotification', {
+      sendEmail('schoolfee.in@gmail.com', 'surveyAdminNotification', {
         // Basic Information
         name: primaryName,
         fatherName: fatherName || '',

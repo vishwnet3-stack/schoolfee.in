@@ -7,12 +7,12 @@ import nodemailer from "nodemailer";
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "vishwnet.schoolfee@gmail.com",
-    pass: "jjoa hcgw gwyz cnvt",
+    user: "schoolfee.in@gmail.com",
+    pass: (process.env.GMAIL_PASS || "rycwxowlurroljhqq").replace(/\s/g, ""),
   },
 });
 
-const ADMIN_EMAIL = "vishwnet.schoolfee@gmail.com";
+const ADMIN_EMAIL = "schoolfee.in@gmail.com";
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
 
 // ─── Email Templates ──────────────────────────────────────────────────────────
@@ -199,7 +199,7 @@ async function sendDashboardEmail(
     const emailContent = (dashboardTemplates[template] as any)(data);
 
     const info = await transporter.sendMail({
-      from: '"Schoolfee Admin" <vishwnet.schoolfee@gmail.com>',
+      from: '"Schoolfee Admin" <schoolfee.in@gmail.com>',
       to,
       subject: emailContent.subject,
       html: emailContent.html,

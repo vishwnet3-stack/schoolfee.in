@@ -16,6 +16,7 @@ import {
   User,
   Globe,
   ClipboardList,
+  HeartHandshake,
 } from "lucide-react";
 
 export const navItems = [
@@ -123,6 +124,11 @@ export const navItems = [
     label: "Payments",
     href: "/dashboard/super-admin/payments",
     icon: CreditCard,
+  },
+  {
+    label: "Donations Received",
+    href: "/dashboard/super-admin/donations-received",
+    icon: HeartHandshake,
   },
   {
     label: "Survey Submissions",

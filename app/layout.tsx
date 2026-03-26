@@ -1,6 +1,4 @@
 import type { Metadata } from "next";
-export const dynamic = "force-dynamic";
-export const fetchCache = "force-no-store";
 
 import "./globals.css";
 

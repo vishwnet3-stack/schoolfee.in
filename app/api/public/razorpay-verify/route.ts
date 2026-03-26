@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
 
     // ── 7. Admin alert ────────────────────────────────────────────────────
     try {
-      await sendEmail("vishwnet.schoolfee@gmail.com", "parentRegistrationAdminAlert", {
+      await sendEmail("schoolfee.in@gmail.com", "parentRegistrationAdminAlert", {
         name: `${firstName} ${lastName}`.trim(),
         email: formData.email,
         phone: formData.phone,

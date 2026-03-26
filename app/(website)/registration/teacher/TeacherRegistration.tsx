@@ -460,7 +460,7 @@ export default function TeacherRegistrationPage() {
   const handleInitiateDigilocker = async () => {
     setIsInitiating(true);
     try {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin;
+      const appUrl = (process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/+$/, "");
       const res = await fetch("/api/public/digilocker/initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

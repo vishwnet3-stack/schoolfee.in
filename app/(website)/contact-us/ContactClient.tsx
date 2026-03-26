@@ -1,4 +1,4 @@
-import {
+  import {
   FaPhoneAlt,
   FaEnvelope,
   FaFacebookF,
@@ -13,7 +13,7 @@ import { FaXTwitter } from "react-icons/fa6";
 
 export default function ContactPage() {
   return (
-    <>
+    <>      
 
     {/* Hero Section */}
       <section className="relative  py-8 flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#00468e] via-[#003366] to-[#002244]">
@@ -23,12 +23,12 @@ export default function ContactPage() {
         <div className="absolute top-20 left-10 w-64 h-64 bg-[#f4951d] rounded-full blur-[100px] opacity-30 animate-pulse"></div>
         <div className="absolute bottom-20 right-10 w-80 h-80 bg-[#0cab47] rounded-full blur-[100px] opacity-30 animate-pulse"></div>
 
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+        <div className="relative z-10 max-w     -7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-extrabold text-white mb-6 leading-tight animate-fadeIn">
             Contact Us
           </h1>
-        </div>
+        </div>    
       </section>
 
       <main className="bg-gray-50">
@@ -93,7 +93,7 @@ export default function ContactPage() {
               <div className="lg:col-span-4">
                 <div className="bg-gradient-to-br from-blue-900 to-blue-800 text-white rounded-3xl p-8 sticky top-28">
                   <h3 className="text-2xl font-bold mb-6">
-                    Hi! We are always here to help you.
+                    Legal Name:<br/> Community Health Mission
                   </h3>
 
                   <InfoItem
@@ -113,8 +113,8 @@ export default function ContactPage() {
                   <InfoItem
                     icon={<FaEnvelope />}
                     title="Email"
-                    value="admin@schoolfee.in"
-                    href="mailto:admin@schoolfee.in"
+                    value="admin@chm.org.in"
+                    href="mailto:admin@chm.org.in"
                   />
 
                   <div className="border-t border-blue-700 my-6" />

@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  createContext, useContext, useEffect, useState, useCallback, ReactNode,
+  createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode,
 } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
@@ -101,10 +101,13 @@ const AdminAuthContext = createContext<AdminAuthContextValue>({
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
-  // Track whether the very first fetch has completed
-  const [initialized, setInitialized] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+
+  // Track whether we've done the initial fetch — never refetch on every route change
+  const initializedRef = useRef(false);
+  // Track the last pathname we ran a guard check for — only re-check when path actually changes
+  const lastGuardedPathRef = useRef<string | null>(null);
 
   const fetchUser = useCallback(async (): Promise<AdminUser | null> => {
     try {
@@ -121,44 +124,69 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  // ── Re-check session on every pathname change ────────────────────────────
-  // This is the key fix: when the login page does router.replace() the pathname
-  // changes, this effect fires, fetchUser() finds the now-set cookie, and sets
-  // the user — so the dashboard renders without a manual page refresh.
+  // ── Initial session fetch — runs ONCE on mount only ──────────────────────
   useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
     const init = async () => {
-      const isLoginPage = pathname === "/dashboard/admin/login";
       setLoading(true);
-
       const u = await fetchUser();
-
       setLoading(false);
-      setInitialized(true);
+
+      const isLoginPage = pathname === "/dashboard/admin/login";
 
       if (!u) {
         if (!isLoginPage) router.replace("/dashboard/admin/login");
         return;
       }
 
-      // Authenticated on login page → push to their home
       if (isLoginPage) {
         router.replace(ROLE_HOME[u.role]);
         return;
       }
 
-      // Route guard: wrong role's section → redirect to their home
       if (!isRouteAllowed(u.role, pathname)) {
         router.replace(ROLE_HOME[u.role]);
       }
     };
+
     init();
-    // pathname is intentionally in deps — re-run on every navigation
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+  }, []);
+
+  // ── Client-side route guard — runs on pathname changes WITHOUT re-fetching ─
+  // Only does a guard check; never fetches from the API again during navigation
+  useEffect(() => {
+    // Skip on first render (the init effect above handles it)
+    if (!initializedRef.current) return;
+    // Skip if still loading or path hasn't actually changed
+    if (loading) return;
+    if (lastGuardedPathRef.current === pathname) return;
+
+    lastGuardedPathRef.current = pathname;
+
+    const isLoginPage = pathname === "/dashboard/admin/login";
+
+    if (!user) {
+      if (!isLoginPage) router.replace("/dashboard/admin/login");
+      return;
+    }
+
+    if (isLoginPage) {
+      router.replace(ROLE_HOME[user.role]);
+      return;
+    }
+
+    if (!isRouteAllowed(user.role, pathname)) {
+      router.replace(ROLE_HOME[user.role]);
+    }
+  }, [pathname, user, loading, router]);
 
   const logout = async () => {
     await fetch("/api/admin-auth/logout", { method: "POST" });
     setUser(null);
+    initializedRef.current = false;
     router.replace("/dashboard/admin/login");
   };
 

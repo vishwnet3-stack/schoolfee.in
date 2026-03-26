@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Send notification to ADMIN ONLY (separate call)
-    sendEmail('vishwnet.schoolfee@gmail.com', 'adminNotification', {
+    sendEmail('schoolfee.in@gmail.com', 'adminNotification', {
       name,
       role,
       mobile,

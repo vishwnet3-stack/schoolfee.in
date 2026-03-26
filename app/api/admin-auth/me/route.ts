@@ -27,10 +27,29 @@ export async function GET(request: NextRequest) {
     const { user_email, user_source } = sessionRows[0];
     let user: any = null;
 
-    // Each table has different columns — only select what actually exists per table.
-    // user_source directs us to the right table; fall through all for old sessions without it.
-
-    if (!user && (user_source === "waitlist" || !user_source)) {
+    // Targeted single-query lookup based on user_source (fast path)
+    if (user_source === "teacher_registrations") {
+      const [rows]: any = await db.execute(
+        `SELECT id, full_name, email, phone, 'teacher' AS role, status FROM teacher_registrations WHERE email = ? LIMIT 1`,
+        [user_email]
+      );
+      if (rows.length > 0) user = { ...rows[0], created_at: null };
+    } else if (user_source === "parent_registrations") {
+      const [rows]: any = await db.execute(
+        `SELECT id, full_name, email, phone, 'parent' AS role, status FROM parent_registrations WHERE email = ? LIMIT 1`,
+        [user_email]
+      );
+      if (rows.length > 0) user = { ...rows[0], created_at: null };
+    } else if (user_source === "school_registrations") {
+      const [rows]: any = await db.execute(
+        `SELECT id, school_name AS full_name, official_email AS email,
+                contact_number AS phone, 'school' AS role, status
+         FROM school_registrations WHERE official_email = ? OR principal_email = ? LIMIT 1`,
+        [user_email, user_email]
+      );
+      if (rows.length > 0) user = { ...rows[0], created_at: null };
+    } else {
+      // waitlist (default / legacy sessions without user_source)
       try {
         const [rows]: any = await db.execute(
           `SELECT id, full_name, email, phone, role, status, created_at FROM waitlist WHERE email = ? LIMIT 1`,
@@ -40,41 +59,26 @@ export async function GET(request: NextRequest) {
       } catch { /* skip if column mismatch */ }
     }
 
-    if (!user && (user_source === "teacher_registrations" || !user_source)) {
-      // teacher_registrations has: id, full_name, email, phone, status — NO created_at
-      const [rows]: any = await db.execute(
-        `SELECT id, full_name, email, phone, 'teacher' AS role, status FROM teacher_registrations WHERE email = ? LIMIT 1`,
-        [user_email]
-      );
-      if (rows.length > 0) user = { ...rows[0], created_at: null };
-    }
-
-    if (!user && (user_source === "parent_registrations" || !user_source)) {
-      try {
-        const [rows]: any = await db.execute(
-          `SELECT id, full_name, email, phone, 'parent' AS role, status FROM parent_registrations WHERE email = ? LIMIT 1`,
-          [user_email]
-        );
-        if (rows.length > 0) user = { ...rows[0], created_at: null };
-      } catch { /* skip if column mismatch */ }
-    }
-
-    if (!user && (user_source === "school_registrations" || !user_source)) {
-      // school_registrations: name → school_name, phone → contact_number, NO created_at
-      const [rows]: any = await db.execute(
-        `SELECT id, school_name AS full_name, official_email AS email,
-                contact_number AS phone, 'school' AS role, status
-         FROM school_registrations WHERE official_email = ? OR principal_email = ? LIMIT 1`,
-        [user_email, user_email]
-      );
-      if (rows.length > 0) user = { ...rows[0], created_at: null };
+    // Fallback: scan remaining tables for legacy sessions with no user_source
+    if (!user && !user_source) {
+      for (const query of [
+        [`SELECT id, full_name, email, phone, 'teacher' AS role, status FROM teacher_registrations WHERE email = ? LIMIT 1`, false],
+        [`SELECT id, full_name, email, phone, 'parent' AS role, status FROM parent_registrations WHERE email = ? LIMIT 1`, false],
+        [`SELECT id, school_name AS full_name, official_email AS email, contact_number AS phone, 'school' AS role, status FROM school_registrations WHERE official_email = ? OR principal_email = ? LIMIT 1`, true],
+      ] as [string, boolean][]) {
+        try {
+          const params = query[1] ? [user_email, user_email] : [user_email];
+          const [rows]: any = await db.execute(query[0], params);
+          if (rows.length > 0) { user = { ...rows[0], created_at: null }; break; }
+        } catch { /* skip */ }
+      }
     }
 
     if (!user) {
       return NextResponse.json({ success: false, error: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id:         user.id,
@@ -87,6 +91,12 @@ export async function GET(request: NextRequest) {
         source:     user_source     || "waitlist",
       },
     });
+
+    // Cache for 30 seconds on the client — avoids hammering the DB on rapid navigation
+    // while staying fresh enough for session validity checks
+    response.headers.set("Cache-Control", "private, max-age=30");
+
+    return response;
 
   } catch (error: any) {
     console.error("Admin auth me error:", error);

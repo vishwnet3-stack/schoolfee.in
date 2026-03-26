@@ -6,8 +6,8 @@ import nodemailer from "nodemailer";
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "vishwnet.schoolfee@gmail.com",
-    pass: "jjoa hcgw gwyz cnvt",
+    user: "schoolfee.in@gmail.com",
+    pass: "rycwxowlurrojhqq",
   },
 });
 
@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
 
     // Send success email
     await transporter.sendMail({
-      from: `"Schoolfee.in" <vishwnet.schoolfee@gmail.com>`,
+      from: `"Schoolfee.in" <schoolfee.in@gmail.com>`,
       to: email,
       subject: `Welcome to Schoolfee Waitlist — ${roleLabel} Registration Confirmed`,
       html: `

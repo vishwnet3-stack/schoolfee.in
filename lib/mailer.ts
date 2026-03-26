@@ -1,11 +1,18 @@
 // lib/mailer.ts
 import nodemailer from "nodemailer";
 
+// const transporter = nodemailer.createTransport({
+//   service: "gmail",
+//   auth: {
+//     user: "schoolfee.in@gmail.com",
+//     pass: "rycwxowlurrojhqq",
+//   },
+// });
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
-    user: "vishwnet.schoolfee@gmail.com",
-    pass: "jjoa hcgw gwyz cnvt",
+    user: process.env.GMAIL_USER,
+    pass: (process.env.GMAIL_PASS || "rycwxowlurroljhqq").replace(/\s/g, ""),
   },
 });
 
@@ -1365,7 +1372,7 @@ const templates = {
     paymentId: string;
     donationAmount: number;
     financialYear: string;
-    panNumber: string;
+    panNumber: string | null;
     address: string;
     city: string;
     state: string;
@@ -1435,7 +1442,7 @@ const templates = {
             </div>
             <div class="info-box">
               <div class="lbl">PAN Number</div>
-              <div class="val">${data.isAnonymous ? "On Record" : data.panNumber}</div>
+              <div class="val">${data.isAnonymous ? "On Record" : (data.panNumber && data.panNumber !== "N/A" ? data.panNumber : "Not provided")}</div>
             </div>
             <div class="info-box">
               <div class="lbl">Financial Year</div>
@@ -1463,6 +1470,9 @@ const templates = {
             Please retain this email as your official receipt. Donations are deductible up to 50% of the
             donated amount (subject to 10% of Adjusted Gross Total Income).
             For FY ${data.financialYear} ITR filing, quote receipt: <strong>${data.receiptNumber}</strong>.
+            ${(!data.panNumber || data.panNumber === "N/A") && data.donationAmount < 2000
+              ? "<br><br><strong>Note:</strong> PAN was not provided. Since your donation is below ₹2,000, PAN is optional. However, to claim an 80G deduction in your ITR, you will need to provide your PAN to our team at <a href=\"mailto:donations@schoolfee.org\" style=\"color:#0B4C8A;\">donations@schoolfee.org</a>."
+              : ""}
           </div>
 
           <p style="font-size:13px;color:#475569;">Questions? Contact us at <a href="mailto:donations@schoolfee.org" style="color:#0B4C8A;">donations@schoolfee.org</a></p>
@@ -1487,14 +1497,14 @@ const templates = {
     receiptNumber: string;
     paymentId: string;
     donationAmount: number;
-    panNumber: string;
+    panNumber: string | null;
     city: string;
     state: string;
     organizationName: string | null;
     organizationType: string;
     isAnonymous: boolean;
   }) => ({
-    subject: `💰 New Donation #${data.donationId} — ₹${data.donationAmount.toLocaleString("en-IN")} | Schoolfee Admin`,
+    subject: `  New Donation #${data.donationId} — ₹${data.donationAmount.toLocaleString("en-IN")} | Schoolfee Admin`,
     html: `
     <!DOCTYPE html>
     <html>
@@ -1532,7 +1542,7 @@ const templates = {
           <div class="row"><span class="label">Donor Name</span><span class="value">${data.isAnonymous ? "Anonymous" : data.name}</span></div>
           <div class="row"><span class="label">Email</span><span class="value">${data.email}</span></div>
           <div class="row"><span class="label">Phone</span><span class="value">${data.phone}</span></div>
-          <div class="row"><span class="label">PAN</span><span class="value">${data.panNumber}</span></div>
+          <div class="row"><span class="label">PAN</span><span class="value">${data.panNumber && data.panNumber !== "N/A" ? data.panNumber : "Not provided"}</span></div>
           <div class="row"><span class="label">Location</span><span class="value">${data.city}, ${data.state}</span></div>
           ${data.organizationName ? `<div class="row"><span class="label">Organisation</span><span class="value">${data.organizationName} (${data.organizationType})</span></div>` : ""}
           <div class="row"><span class="label">Payment ID</span><span class="value" style="font-size:11px;font-family:monospace;">${data.paymentId}</span></div>
@@ -1641,7 +1651,7 @@ export async function sendEmail(
     const emailContent = templates[template](data);
 
     const info = await transporter.sendMail({
-      from: '"Schoolfee" <vishwnet.schoolfee@gmail.com>',
+      from: '"Schoolfee" <schoolfee.in@gmail.com>',
       to,
       subject: emailContent.subject,
       html: emailContent.html,
@@ -1700,8 +1710,8 @@ export async function sendSurveyConfirmation(data: {
 // Send admin notification for survey submission
 export async function sendSurveyAdminNotification(data: any) {
   return sendEmail(
-    "vishwnet.schoolfee@gmail.com",
+    "schoolfee.in@gmail.com",
     "surveyAdminNotification",
     data,
   );
-} 
+}
