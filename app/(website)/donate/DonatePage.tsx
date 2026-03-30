@@ -52,6 +52,8 @@ const INDIAN_STATES = [
 ]
 
 const RAZORPAY_KEY = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!
+const MIN_DONATION = 1000          // Minimum donation: ₹1,000
+const MAX_DONATION = 500000        // Maximum donation: ₹5,00,000
 const PAN_REQUIRED_THRESHOLD = 2001 // PAN required for amount STRICTLY > 2000 (i.e. >= 2001)
 
 function validateForm(form: FormData, amount: number): FormErrors {
@@ -77,8 +79,8 @@ function validateForm(form: FormData, amount: number): FormErrors {
   if (!form.pincode.trim()) e.pincode = "Pincode is required."
   else if (!/^\d{6}$/.test(form.pincode.trim())) e.pincode = "Enter a valid 6-digit pincode."
   if (form.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(form.gstin.toUpperCase())) e.gstin = "Enter a valid 15-digit GSTIN."
-  if (amount < 100) e.amount = "Minimum donation is ₹100."
-  if (amount > 1000000) e.amount = "Maximum is ₹10,00,000 per transaction."
+  if (!amount || amount < MIN_DONATION) e.amount = `Minimum donation is ₹${MIN_DONATION.toLocaleString("en-IN")}.`
+  else if (amount > MAX_DONATION) e.amount = `Maximum donation is ₹${MAX_DONATION.toLocaleString("en-IN")} per transaction.`
   return e
 }
 
@@ -244,7 +246,13 @@ export default function DonatePage() {
   const currentAmount = customAmount ? parseInt(customAmount) || 0 : selectedAmount || 0
 
   const handleAmountSelect = (amount: number) => { setSelectedAmount(amount); setCustomAmount(""); setErrors(e => ({ ...e, amount: "" })) }
-  const handleCustomAmount = (value: string) => { setCustomAmount(value); setSelectedAmount(null); setErrors(e => ({ ...e, amount: "" })) }
+  const handleCustomAmount = (value: string) => {
+    // Strip anything that isn't a digit, then cap at 6 characters (max ₹5,00,000)
+    const digits = value.replace(/\D/g, "").slice(0, 6)
+    setCustomAmount(digits)
+    setSelectedAmount(null)
+    setErrors(e => ({ ...e, amount: "" }))
+  }
   const updateForm = (field: keyof FormData, value: string | boolean) => {
     setForm(p => ({ ...p, [field]: value })); setErrors(p => ({ ...p, [field]: "" }))
   }
@@ -402,13 +410,28 @@ export default function DonatePage() {
                       <span className="text-sm text-gray-500 whitespace-nowrap">Custom amount:</span>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">₹</span>
-                        <input id="amount" type="number" value={customAmount} onChange={(e) => handleCustomAmount(e.target.value)}
-                          placeholder="Enter amount"
+                        <input
+                          id="amount"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={customAmount}
+                          onChange={(e) => handleCustomAmount(e.target.value)}
+                          onKeyDown={(e) => { if (["e","E","+","-","."].includes(e.key)) e.preventDefault() }}
+                          placeholder="1000 – 5,00,000"
+                          maxLength={6}
+                          autoComplete="off"
                           className={`border rounded-lg pl-7 pr-3 py-2.5 text-sm w-44 focus:outline-none transition-colors ${errors.amount ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-[#0B4C8A]"}`} />
                       </div>
                     </div>
                     {errors.amount && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><span>⚠</span>{errors.amount}</p>}
-                    {currentAmount >= 100 && (
+                    {!errors.amount && customAmount && currentAmount > 0 && currentAmount < MIN_DONATION && (
+                      <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Minimum donation is ₹1,000.</p>
+                    )}
+                    {!errors.amount && currentAmount > MAX_DONATION && (
+                      <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Maximum donation is ₹5,00,000 per transaction.</p>
+                    )}
+                    {currentAmount >= MIN_DONATION && currentAmount <= MAX_DONATION && (
                       <div className="mt-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2 flex items-center gap-2">
                         <FaCheckCircle className="text-green-500 text-sm flex-shrink-0" />
                         <span className="text-sm text-green-700">You are donating <strong>₹{currentAmount.toLocaleString("en-IN")}</strong></span>
@@ -512,7 +535,7 @@ export default function DonatePage() {
 
                   {/* SUBMIT */}
                   <div className="pt-1">
-                    <button onClick={handleDonate} disabled={isLoading || currentAmount < 1}
+                    <button onClick={handleDonate} disabled={isLoading || currentAmount < MIN_DONATION || currentAmount > MAX_DONATION}
                       className="w-full bg-[#F9A11B] text-white py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2 hover:bg-[#e8920a] transition-all shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]">
                       {isLoading ? (
                         <span className="flex items-center gap-2">

@@ -68,7 +68,15 @@ async function ensureTables(db: mysql.Connection) {
   await db.query(`
     INSERT IGNORE INTO app_config (config_key, config_value) VALUES
     ('donation_min_amount', '1000'),
-    ('donation_max_amount', '50000000')
+    ('donation_max_amount', '500000')
+  `);
+
+  // Ensure existing rows also reflect the correct limits (idempotent)
+  await db.query(`
+    INSERT INTO app_config (config_key, config_value) VALUES
+      ('donation_min_amount', '1000'),
+      ('donation_max_amount', '500000')
+    ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)
   `);
 }
 
@@ -117,10 +125,10 @@ export async function POST(req: NextRequest) {
       }
     } catch {}
 
-    const validatedAmount = Number(amount);
-    if (!amount || isNaN(validatedAmount) || validatedAmount < minAmount || validatedAmount > maxAmount) {
+    const validatedAmount = Math.floor(Number(amount));
+    if (!amount || isNaN(validatedAmount) || !isFinite(validatedAmount) || validatedAmount < minAmount || validatedAmount > maxAmount) {
       return NextResponse.json(
-        { success: false, message: `Donation amount must be between Rs. ${minAmount.toLocaleString("en-IN")} and Rs. ${maxAmount.toLocaleString("en-IN")}.` },
+        { success: false, message: `Donation amount must be between ₹${minAmount.toLocaleString("en-IN")} and ₹${maxAmount.toLocaleString("en-IN")}.` },
         { status: 400 }
       );
     }
