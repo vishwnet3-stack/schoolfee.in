@@ -357,7 +357,7 @@ export default function DonatePage() {
             </div>
             <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold text-[#0B4C8A] mb-4 leading-tight">
               Donate to Schoolfee.org
-              <span className="block text-xl md:text-2xl font-normal text-gray-500 mt-1">An initiative of CHM — Community Health Mission</span>
+              <span className="block text-xl md:text-2xl font-normal text-gray-500 mt-1">An initiative of CHM - Community Health Mission</span>
             </h1>
             <p className="text-gray-600 max-w-xl mx-auto text-base leading-relaxed">
               Help children continue their education despite financial hardship.

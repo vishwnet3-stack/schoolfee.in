@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.js",
-    "build": "next build",
-    "start": "cross-env NODE_ENV=production node server.js",
+    "dev": "next dev",
+    "build": "node next build",
+    "start": "next start",
     "lint": "eslint",
     "migrate": "tsx lib/migrate.ts"
   },
-  "dependencies": {
+  "dependencies": {           
     "@hookform/resolvers": "^5.2.2",
     "@radix-ui/react-checkbox": "^1.3.3",
     "@radix-ui/react-dialog": "^1.1.15",
