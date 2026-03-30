@@ -52,7 +52,7 @@ const INDIAN_STATES = [
 ]
 
 const RAZORPAY_KEY = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!
-const MIN_DONATION = 1000          // Minimum donation: ₹1,000
+const MIN_DONATION = 11            // Minimum donation: ₹11
 const MAX_DONATION = 500000        // Maximum donation: ₹5,00,000
 const PAN_REQUIRED_THRESHOLD = 2001 // PAN required for amount STRICTLY > 2000 (i.e. >= 2001)
 
@@ -418,7 +418,7 @@ export default function DonatePage() {
                           value={customAmount}
                           onChange={(e) => handleCustomAmount(e.target.value)}
                           onKeyDown={(e) => { if (["e","E","+","-","."].includes(e.key)) e.preventDefault() }}
-                          placeholder="1000 – 5,00,000"
+                          placeholder="11 – 5,00,000"
                           maxLength={6}
                           autoComplete="off"
                           className={`border rounded-lg pl-7 pr-3 py-2.5 text-sm w-44 focus:outline-none transition-colors ${errors.amount ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-[#0B4C8A]"}`} />
@@ -426,7 +426,7 @@ export default function DonatePage() {
                     </div>
                     {errors.amount && <p className="text-red-500 text-xs mt-1 flex items-center gap-1"><span>⚠</span>{errors.amount}</p>}
                     {!errors.amount && customAmount && currentAmount > 0 && currentAmount < MIN_DONATION && (
-                      <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Minimum donation is ₹1,000.</p>
+                      <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Minimum donation is ₹11.</p>
                     )}
                     {!errors.amount && currentAmount > MAX_DONATION && (
                       <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Maximum donation is ₹5,00,000 per transaction.</p>

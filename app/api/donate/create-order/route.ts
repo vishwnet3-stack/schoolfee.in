@@ -67,14 +67,14 @@ async function ensureTables(db: mysql.Connection) {
 
   await db.query(`
     INSERT IGNORE INTO app_config (config_key, config_value) VALUES
-    ('donation_min_amount', '1000'),
+    ('donation_min_amount', '11'),
     ('donation_max_amount', '500000')
   `);
 
   // Ensure existing rows also reflect the correct limits (idempotent)
   await db.query(`
     INSERT INTO app_config (config_key, config_value) VALUES
-      ('donation_min_amount', '1000'),
+      ('donation_min_amount', '11'),
       ('donation_max_amount', '500000')
     ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)
   `);
@@ -112,8 +112,8 @@ export async function POST(req: NextRequest) {
     await ensureTables(db);
 
     // ── Server-side re-validation of amount (fraud protection) ───────────────
-    let minAmount = 1000;
-    let maxAmount = 50000000;
+    let minAmount = 11;
+    let maxAmount = 500000;
     try {
       const [rows] = await db.query<any[]>(
         `SELECT config_key, config_value FROM app_config

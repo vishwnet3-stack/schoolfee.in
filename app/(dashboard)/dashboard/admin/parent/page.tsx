@@ -32,7 +32,6 @@ const feeBreakdown = [
   { name: "Activity", value: 8000, color: "#10b981" },
   { name: "Lab & Library", value: 5500, color: "#8b5cf6" },
 ];
-
 const recentActivity = [
   { id: "A1", desc: "Schoolfee paid May Tuition to DPS New Delhi", amount: 16800, date: "15 May 2025", dir: "out", status: "done" },
   { id: "A2", desc: "You repaid Schoolfee via UPI", amount: 11000, date: "10 May 2025", dir: "in", status: "done" },
