@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { FaCalendar, FaUser, FaTag, FaArrowLeft, FaArrowRight } from 'react-icons/fa';
+import { FaCalendar, FaUser, FaTag, FaArrowLeft, FaArrowRight, FaClock } from 'react-icons/fa';
 import { FaFacebook, FaTwitter, FaLinkedin, FaWhatsapp } from 'react-icons/fa';
 import Link from 'next/link';
 
@@ -15,6 +15,8 @@ interface BlogPost {
     featured_alt?: string;
     author: string;
     created_at: string;
+    updated_at?: string;
+    published_at?: string;
     category_name: string;
     category_slug: string;
     primary_keyword?: string;
@@ -217,10 +219,20 @@ export default function BlogDetailsClient({ post }: { post: BlogPost }) {
                                     <FaUser className="text-[#00468E]" />
                                     <span className="font-medium">{post.author}</span>
                                 </div>
+                                <span className="text-gray-300 hidden sm:inline">|</span>
                                 <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-600">
                                     <FaCalendar className="text-[#00468E]" />
-                                    <span>{formatDate(post.created_at)}</span>
+                                    <span>Published: <span className="font-medium">{formatDate(post.published_at || post.created_at)}</span></span>
                                 </div>
+                                {post.updated_at && post.updated_at !== post.created_at && (
+                                    <>
+                                        <span className="text-gray-300 hidden sm:inline">|</span>
+                                        <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-600">
+                                            <FaClock className="text-[#00468E]" />
+                                            <span>Last Updated: <span className="font-medium">{formatDate(post.updated_at)}</span></span>
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             {/* Featured Image */}

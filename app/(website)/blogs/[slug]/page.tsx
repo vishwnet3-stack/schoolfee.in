@@ -7,7 +7,8 @@ import { db } from '@/lib/db';
 async function getPost(slug: string) {
   try {
     const [posts] = await db.execute<any[]>(
-      `SELECT p.*, c.name as category_name, c.slug as category_slug
+      `SELECT p.*, c.name as category_name, c.slug as category_slug,
+              p.published_at, p.updated_at
        FROM blog_posts p
        LEFT JOIN blog_categories c ON p.category_id = c.id
        WHERE p.slug = ? AND p.status = 'published'`,

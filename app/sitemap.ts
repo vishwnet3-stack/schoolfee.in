@@ -33,7 +33,7 @@ function discoverPages(websiteDir: string): string[] {
     const isExcluded = segments.some(s => EXCLUDE_PAGES.has(s))
 
     if (items.some(f => f.isFile() && f.name === 'page.tsx') && !isDynamic && !isExcluded) {
-      pages.push(route || '/')
+      pages.push(route || '')
     }
 
     for (const item of items) {
