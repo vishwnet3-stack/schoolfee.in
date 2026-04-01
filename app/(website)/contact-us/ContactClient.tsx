@@ -93,7 +93,7 @@ export default function ContactPage() {
               <div className="lg:col-span-4">
                 <div className="bg-gradient-to-br from-blue-900 to-blue-800 text-white rounded-3xl p-8 sticky top-28">
                   <h3 className="text-2xl font-bold mb-6">
-                    Legal Name:<br/> Community Health Mission
+                    Contact Informmation
                   </h3>
 
                   <InfoItem
@@ -113,8 +113,8 @@ export default function ContactPage() {
                   <InfoItem
                     icon={<FaEnvelope />}
                     title="Email"
-                    value="admin@chm.org.in"
-                    href="mailto:admin@chm.org.in"
+                    value="admin@schoolfee.in"
+                    href="mailto:admin@schoolfee.in"
                   />
 
                   <div className="border-t border-blue-700 my-6" />

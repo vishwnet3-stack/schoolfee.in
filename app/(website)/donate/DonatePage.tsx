@@ -20,6 +20,8 @@ import {
   FaReceipt,
   FaArrowRight,
   FaCalendarAlt,
+  FaPhoneAlt,
+  FaHandshake,
 } from "react-icons/fa"
 
 interface FormData {
@@ -52,9 +54,10 @@ const INDIAN_STATES = [
 ]
 
 const RAZORPAY_KEY = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!
-const MIN_DONATION = 11            // Minimum donation: ₹11
-const MAX_DONATION = 500000        // Maximum donation: ₹5,00,000
-const PAN_REQUIRED_THRESHOLD = 2001 // PAN required for amount STRICTLY > 2000 (i.e. >= 2001)
+const MIN_DONATION = 11
+const MAX_DONATION = 10000000
+const LARGE_DONATION_THRESHOLD = 500000
+const PAN_REQUIRED_THRESHOLD = 2001
 
 function validateForm(form: FormData, amount: number): FormErrors {
   const e: FormErrors = {}
@@ -80,7 +83,6 @@ function validateForm(form: FormData, amount: number): FormErrors {
   else if (!/^\d{6}$/.test(form.pincode.trim())) e.pincode = "Enter a valid 6-digit pincode."
   if (form.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(form.gstin.toUpperCase())) e.gstin = "Enter a valid 15-digit GSTIN."
   if (!amount || amount < MIN_DONATION) e.amount = `Minimum donation is ₹${MIN_DONATION.toLocaleString("en-IN")}.`
-  else if (amount > MAX_DONATION) e.amount = `Maximum donation is ₹${MAX_DONATION.toLocaleString("en-IN")} per transaction.`
   return e
 }
 
@@ -94,7 +96,6 @@ function Field({ label, error, children }: { label?: string; error?: string; chi
   )
 }
 
-// ── SUCCESS SCREEN — replaces old modal + 80G print section ──────────────────
 function SuccessScreen({ result, form, onReset }: { result: DonationResult; form: FormData; onReset: () => void }) {
   const donorName = form.isAnonymous ? "Anonymous Donor" : `${form.firstName} ${form.lastName}`
   const now = new Date()
@@ -117,8 +118,6 @@ function SuccessScreen({ result, form, onReset }: { result: DonationResult; form
   return (
     <main className="bg-[#F6F5F1] min-h-screen py-10 px-4 sm:px-6">
       <div className="max-w-2xl mx-auto">
-
-        {/* Top success banner */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
           <div className="bg-gradient-to-br from-[#0B4C8A] to-[#083a6b] px-6 pt-8 pb-6 text-center">
             <div className="w-16 h-16 bg-green-400/20 border-2 border-green-400/40 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -129,20 +128,12 @@ function SuccessScreen({ result, form, onReset }: { result: DonationResult; form
               Thank you for your generous contribution, {form.isAnonymous ? "dear donor" : form.firstName}.
             </p>
           </div>
-
-          {/* Amount highlight */}
           <div className="bg-amber-50 border-b border-amber-100 px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="text-center sm:text-left">
               <div className="text-xs text-amber-700 font-semibold uppercase tracking-widest mb-0.5">Amount Donated</div>
               <div className="text-3xl font-bold text-[#0B4C8A]">₹{result.amount.toLocaleString("en-IN")}</div>
             </div>
-            {/* <div className="text-center sm:text-right">
-              <div className="text-xs text-amber-700 font-semibold uppercase tracking-widest mb-0.5">Donation ID</div>
-              <div className="text-lg font-bold text-amber-800">#{result.donationId}</div>
-            </div> */}
           </div>
-
-          {/* Email notice */}
           <div className="bg-green-50 border-b border-green-100 px-6 py-3 flex items-start gap-3">
             <FaEnvelope className="text-green-600 text-sm mt-0.5 flex-shrink-0" />
             <p className="text-sm text-green-800">
@@ -151,8 +142,6 @@ function SuccessScreen({ result, form, onReset }: { result: DonationResult; form
             </p>
           </div>
         </div>
-
-        {/* Donor & payment details */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 className="font-semibold text-gray-800 text-base">Your Payment Summary</h2>
@@ -183,31 +172,6 @@ function SuccessScreen({ result, form, onReset }: { result: DonationResult; form
             ))}
           </div>
         </div>
-
-        {/* What happens next */}
-        {/* <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-800 text-base">What Happens Next?</h2>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {[
-              { step: "01", title: "Email Confirmation Sent", desc: "A detailed receipt has been sent to your email right now." },
-              { step: "02", title: "80G Receipt in 24 Hours", desc: "Your official 80G tax exemption certificate will arrive via email." },
-              { step: "03", title: "Admin Verification", desc: "Our team will verify and confirm your donation in the dashboard." },
-              { step: "04", title: "Quarterly Impact Report", desc: "You'll receive an impact report showing how your donation helped." },
-            ].map(({ step, title, desc }) => (
-              <div key={step} className="px-6 py-4 flex items-start gap-4">
-                <div className="w-8 h-8 rounded-full bg-[#0B4C8A] text-white text-xs font-bold flex items-center justify-center flex-shrink-0">{step}</div>
-                <div>
-                  <div className="text-sm font-semibold text-gray-800">{title}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div> */}
-
-        {/* CTAs */}
         <div className="flex flex-col sm:flex-row gap-3">
           <a href="/"
             className="flex-1 bg-[#0B4C8A] text-white py-3.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#083a6b] transition-all shadow-md hover:shadow-lg">
@@ -228,7 +192,6 @@ function SuccessScreen({ result, form, onReset }: { result: DonationResult; form
   )
 }
 
-// ── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function DonatePage() {
   const [selectedAmount, setSelectedAmount] = useState<number | null>(5000)
   const [customAmount, setCustomAmount] = useState("")
@@ -242,22 +205,36 @@ export default function DonatePage() {
   const [showOrgFields, setShowOrgFields] = useState(false)
   const [successResult, setSuccessResult] = useState<DonationResult | null>(null)
   const [failureModal, setFailureModal] = useState<string | null>(null)
+  const [showLargeAmountModal, setShowLargeAmountModal] = useState(false)
 
   const currentAmount = customAmount ? parseInt(customAmount) || 0 : selectedAmount || 0
 
-  const handleAmountSelect = (amount: number) => { setSelectedAmount(amount); setCustomAmount(""); setErrors(e => ({ ...e, amount: "" })) }
+  const handleAmountSelect = (amount: number) => {
+    setSelectedAmount(amount)
+    setCustomAmount("")
+    setErrors(e => ({ ...e, amount: "" }))
+  }
+
+  // ── CHANGED: removed the large-donation modal trigger from here ──
   const handleCustomAmount = (value: string) => {
-    // Strip anything that isn't a digit, then cap at 6 characters (max ₹5,00,000)
-    const digits = value.replace(/\D/g, "").slice(0, 6)
+    const digits = value.replace(/\D/g, "").slice(0, 8)
     setCustomAmount(digits)
     setSelectedAmount(null)
     setErrors(e => ({ ...e, amount: "" }))
   }
+
   const updateForm = (field: keyof FormData, value: string | boolean) => {
-    setForm(p => ({ ...p, [field]: value })); setErrors(p => ({ ...p, [field]: "" }))
+    setForm(p => ({ ...p, [field]: value }))
+    setErrors(p => ({ ...p, [field]: "" }))
   }
 
   const handleDonate = async () => {
+    // ── CHANGED: show large donation modal on button click and stop ──
+    if (currentAmount > LARGE_DONATION_THRESHOLD) {
+      setShowLargeAmountModal(true)
+      return
+    }
+
     const errs = validateForm(form, currentAmount)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
@@ -347,7 +324,6 @@ export default function DonatePage() {
     setSelectedAmount(5000); setCustomAmount("")
   }
 
-  // Switch to full-page success screen after payment
   if (successResult) {
     return <SuccessScreen result={successResult} form={form} onReset={resetForm} />
   }
@@ -418,8 +394,8 @@ export default function DonatePage() {
                           value={customAmount}
                           onChange={(e) => handleCustomAmount(e.target.value)}
                           onKeyDown={(e) => { if (["e","E","+","-","."].includes(e.key)) e.preventDefault() }}
-                          placeholder="11 – 5,00,000"
-                          maxLength={6}
+                          placeholder="Enter Amount"
+                          maxLength={8}
                           autoComplete="off"
                           className={`border rounded-lg pl-7 pr-3 py-2.5 text-sm w-44 focus:outline-none transition-colors ${errors.amount ? "border-red-400 bg-red-50" : "border-gray-200 focus:border-[#0B4C8A]"}`} />
                       </div>
@@ -428,10 +404,7 @@ export default function DonatePage() {
                     {!errors.amount && customAmount && currentAmount > 0 && currentAmount < MIN_DONATION && (
                       <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Minimum donation is ₹11.</p>
                     )}
-                    {!errors.amount && currentAmount > MAX_DONATION && (
-                      <p className="text-amber-600 text-xs mt-1 flex items-center gap-1"><span>⚠</span>Maximum donation is ₹5,00,000 per transaction.</p>
-                    )}
-                    {currentAmount >= MIN_DONATION && currentAmount <= MAX_DONATION && (
+                    {currentAmount >= MIN_DONATION && (
                       <div className="mt-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2 flex items-center gap-2">
                         <FaCheckCircle className="text-green-500 text-sm flex-shrink-0" />
                         <span className="text-sm text-green-700">You are donating <strong>₹{currentAmount.toLocaleString("en-IN")}</strong></span>
@@ -535,7 +508,7 @@ export default function DonatePage() {
 
                   {/* SUBMIT */}
                   <div className="pt-1">
-                    <button onClick={handleDonate} disabled={isLoading || currentAmount < MIN_DONATION || currentAmount > MAX_DONATION}
+                    <button onClick={handleDonate} disabled={isLoading || currentAmount < MIN_DONATION}
                       className="w-full bg-[#F9A11B] text-white py-3.5 rounded-xl font-semibold text-base flex items-center justify-center gap-2 hover:bg-[#e8920a] transition-all shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]">
                       {isLoading ? (
                         <span className="flex items-center gap-2">
@@ -607,6 +580,59 @@ export default function DonatePage() {
         </section>
 
       </main>
+
+      {/* LARGE AMOUNT MODAL — only shown when user clicks Donate Now with amount > ₹5,00,000 */}
+      {showLargeAmountModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
+            <div className="bg-gradient-to-br from-[#0B4C8A] to-[#083a6b] px-6 pt-7 pb-6 text-center">
+              <div className="w-14 h-14 bg-amber-400/20 border-2 border-amber-400/40 rounded-full flex items-center justify-center mx-auto mb-3">
+                <FaHandshake className="text-amber-300 text-2xl" />
+              </div>
+              <h2 className="text-xl font-bold text-white mb-1">Large Donation – Let's Connect!</h2>
+              <p className="text-white/70 text-sm">For donations above ₹5,00,000, our team will personally assist you.</p>
+            </div>
+            <div className="px-6 py-5 space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <p className="text-amber-900 text-sm font-medium mb-1">Why contact us directly?</p>
+                <ul className="text-amber-800 text-xs space-y-1 list-disc list-inside">
+                  <li>Dedicated relationship manager for your donation</li>
+                  <li>Custom 80G receipts & CSR compliance documents</li>
+                  <li>Personalized impact reporting for large donors</li>
+                  <li>Flexible payment modes (NEFT, RTGS, Cheque)</li>
+                </ul>
+              </div>
+              <a
+                href="tel:+919355355233"
+                className="flex items-center justify-center gap-3 w-full bg-[#0B4C8A] text-white py-3.5 rounded-xl font-semibold text-base hover:bg-[#083a6b] transition-all shadow-md hover:shadow-lg"
+              >
+                <FaPhoneAlt className="text-sm" />
+                Call Us: +91 93553 55233
+              </a>
+              <div className="text-center text-xs text-gray-400">
+                Or email us at{" "}
+                <a href="mailto:donations@schoolfee.org" className="text-[#0B4C8A] hover:underline font-medium">
+                  donations@schoolfee.org
+                </a>
+              </div>
+              <div className="border-t border-gray-100 pt-3 flex gap-2">
+                <button
+                  onClick={() => setShowLargeAmountModal(false)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2.5 rounded-xl text-sm font-medium hover:bg-gray-50 transition"
+                >
+                  Continue Anyway
+                </button>
+                <button
+                  onClick={() => { setShowLargeAmountModal(false); setCustomAmount(""); setSelectedAmount(5000) }}
+                  className="flex-1 bg-amber-500 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-amber-600 transition"
+                >
+                  Change Amount
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FAILURE MODAL */}
       {failureModal && (
