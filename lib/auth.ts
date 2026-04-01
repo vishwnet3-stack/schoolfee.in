@@ -1,7 +1,7 @@
 // lib/auth.ts
 import { cookies } from 'next/headers';
 import { db } from './db';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 // In-memory store for env-fallback admin sessions (no DB needed)
