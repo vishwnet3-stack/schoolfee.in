@@ -2,7 +2,7 @@
 // Serves APAAR PDF documents to authenticated admin users ONLY.
 // Files are stored in /private-uploads/apaar/ which is NOT web-accessible.
 // Normal users (parents, public) cannot access these documents.
-
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
 import fs from "fs";

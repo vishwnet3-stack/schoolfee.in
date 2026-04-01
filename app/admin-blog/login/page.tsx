@@ -1,4 +1,5 @@
 // app/admin-blog/login/page.tsx
+export const dynamic = 'force-dynamic';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth';
 import LoginForm from './LoginForm';

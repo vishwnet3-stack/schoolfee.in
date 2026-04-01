@@ -1,4 +1,5 @@
 // app/admin-blog/categories/create/page.tsx
+export const dynamic = 'force-dynamic';
 import { redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import CategoryForm from '../CategoryForm';

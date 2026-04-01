@@ -1,6 +1,6 @@
 // app/api/public/digilocker/status/route.ts
 // Poll whether a digilocker session has been completed by the user
-
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 

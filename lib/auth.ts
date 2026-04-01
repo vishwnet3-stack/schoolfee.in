@@ -4,6 +4,9 @@ import { db } from './db';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 
+// In-memory store for env-fallback admin sessions (no DB needed)
+const envFallbackSessions = new Map<string, { expiresAt: Date }>();
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -22,10 +25,18 @@ export async function createSession(userId: number): Promise<string> {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
-  await db.execute(
-    'INSERT INTO admin_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
-    [userId, sessionToken, expiresAt]
-  );
+  // For env-fallback admin (userId=0), skip DB session insert
+  if (userId !== 0) {
+    try {
+      await db.execute(
+        'INSERT INTO admin_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
+        [userId, sessionToken, expiresAt]
+      );
+    } catch (error: any) {
+      console.error('⚠️ Could not persist session to DB:', error.message);
+      // Continue anyway — cookie will still be set
+    }
+  }
 
   // Set cookie
   const cookieStore = await cookies();
@@ -36,6 +47,11 @@ export async function createSession(userId: number): Promise<string> {
     expires: expiresAt,
     path: '/',
   });
+
+  // For env-fallback, also store session in a lightweight in-memory map
+  if (userId === 0) {
+    envFallbackSessions.set(sessionToken, { expiresAt });
+  }
 
   return sessionToken;
 }
@@ -50,7 +66,24 @@ export async function getSession(): Promise<AdminUser | null> {
       return null;
     }
 
-    // Check if session exists and is valid
+    // Check in-memory fallback sessions first (env admin)
+    const fallback = envFallbackSessions.get(sessionToken);
+    if (fallback) {
+      if (fallback.expiresAt > new Date()) {
+        const envAdminUsername = process.env.ADMIN_USERNAME!;
+        return {
+          id: 0,
+          username: envAdminUsername,
+          email: process.env.ADMIN_EMAIL || 'admin@admin.com',
+          full_name: 'Admin',
+        };
+      } else {
+        envFallbackSessions.delete(sessionToken);
+        return null;
+      }
+    }
+
+    // Check if session exists and is valid in DB
     const [sessions] = await db.execute<any[]>(
       `SELECT s.user_id, u.id, u.username, u.email, u.full_name 
        FROM admin_sessions s
@@ -81,6 +114,25 @@ export async function verifyCredentials(
   username: string,
   password: string
 ): Promise<AdminUser | null> {
+  // ── ENV-BASED FALLBACK ADMIN ─────────────────────────────────────────
+  // If DB is unreachable (e.g. dev machine blocked by hosting firewall),
+  // allow login via ADMIN_USERNAME / ADMIN_PASSWORD set in .env
+  const envAdminUsername = process.env.ADMIN_USERNAME;
+  const envAdminPassword = process.env.ADMIN_PASSWORD;
+
+  if (envAdminUsername && envAdminPassword) {
+    if (username === envAdminUsername && password === envAdminPassword) {
+      console.log('✅ Admin authenticated via env credentials (fallback mode)');
+      return {
+        id: 0,
+        username: envAdminUsername,
+        email: process.env.ADMIN_EMAIL || 'admin@admin.com',
+        full_name: 'Admin',
+      };
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────
+
   try {
     const [users] = await db.execute<any[]>(
       'SELECT id, username, email, password, full_name FROM admin_users WHERE username = ? AND is_active = TRUE',
@@ -98,10 +150,12 @@ export async function verifyCredentials(
       return null;
     }
 
-    // Update last login
-    await db.execute('UPDATE admin_users SET last_login = NOW() WHERE id = ?', [
-      user.id,
-    ]);
+    // Update last login (ignore errors — non-critical)
+    try {
+      await db.execute('UPDATE admin_users SET last_login = NOW() WHERE id = ?', [
+        user.id,
+      ]);
+    } catch (_) {}
 
     return {
       id: user.id,
@@ -109,8 +163,13 @@ export async function verifyCredentials(
       email: user.email,
       full_name: user.full_name,
     };
-  } catch (error) {
-    console.error('Credential verification error:', error);
+  } catch (error: any) {
+    const isConnErr = error?.code === 'ETIMEDOUT' || error?.code === 'ECONNREFUSED' || error?.code === 'ENOTFOUND';
+    if (isConnErr) {
+      console.error('❌ DB unreachable during credential check. Set ADMIN_USERNAME and ADMIN_PASSWORD in .env for local dev fallback.');
+    } else {
+      console.error('Credential verification error:', error);
+    }
     return null;
   }
 }
@@ -122,9 +181,14 @@ export async function destroySession(): Promise<void> {
     const sessionToken = cookieStore.get('admin_session')?.value;
 
     if (sessionToken) {
-      await db.execute('DELETE FROM admin_sessions WHERE session_token = ?', [
-        sessionToken,
-      ]);
+      // Remove from in-memory fallback store if present
+      envFallbackSessions.delete(sessionToken);
+      // Try to remove from DB (ignore errors if DB is unreachable)
+      try {
+        await db.execute('DELETE FROM admin_sessions WHERE session_token = ?', [
+          sessionToken,
+        ]);
+      } catch (_) {}
     }
 
     cookieStore.delete('admin_session');

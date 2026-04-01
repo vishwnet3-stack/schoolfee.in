@@ -5,35 +5,33 @@ import { verifyCredentials, createSession } from '@/lib/auth';
 export async function POST(request: NextRequest) {
   try {
     const { username, password } = await request.json();
-    console.log(' Admin login attempt for username:', username);
+    console.log('Admin login attempt for username:', username);
 
     // Validate input
     if (!username || !password) {
-      console.log(' Missing username or password');
       return NextResponse.json(
         { error: 'Username and password are required' },
         { status: 400 }
       );
     }
 
-    // Verify credentials
-    console.log(' Verifying credentials for:', username);
+    // Verify credentials (checks env fallback first, then DB)
+    console.log('Verifying credentials for:', username);
     const user = await verifyCredentials(username, password);
-    console.log(' Credentials verification result:', user ? 'Success' : 'Failed');
+    console.log('Credentials verification result:', user ? 'Success' : 'Failed');
 
     if (!user) {
-      console.log(' Invalid credentials for username:', username);
       return NextResponse.json(
         { error: 'Invalid username or password' },
         { status: 401 }
       );
     }
 
-    console.log(' Creating session for user:', user.id);
     // Create session
+    console.log('Creating session for user:', user.username);
     await createSession(user.id);
 
-    console.log(' Admin login successful for:', username);
+    console.log('Admin login successful for:', username);
     return NextResponse.json({
       success: true,
       user: {
@@ -44,7 +42,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    console.error(' Login error:', error);
+    console.error('Login error:', error);
     return NextResponse.json(
       { error: 'An error occurred during login' },
       { status: 500 }

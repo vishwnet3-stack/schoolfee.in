@@ -1,4 +1,5 @@
 // app/api/public/my-activity/route.ts
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getUserFromSession } from "@/lib/public-auth";

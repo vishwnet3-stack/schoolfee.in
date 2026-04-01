@@ -1,4 +1,5 @@
 // app/admin-blog/categories/page.tsx
+export const dynamic = 'force-dynamic';
 import { redirect } from 'next/navigation';
 import { requireAuth } from '@/lib/auth';
 import { db } from '@/lib/db';
