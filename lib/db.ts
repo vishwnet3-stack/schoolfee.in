@@ -8,7 +8,6 @@ export const db = mysql.createPool({
   user: process.env.DB_USER!,
   password: process.env.DB_PASS!,
   database: process.env.DB_NAME!,
-  // Prevent ETIMEDOUT from hanging forever
   connectTimeout: 10000,
   waitForConnections: true,
   connectionLimit: 10,
@@ -19,7 +18,6 @@ export const db = mysql.createPool({
   keepAliveInitialDelay: 0,
 });
 
-// Test connection function
 export async function testConnection() {
   try {
     const connection = await db.getConnection();

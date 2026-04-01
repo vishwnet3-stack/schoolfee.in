@@ -25,7 +25,7 @@
 import path from "path";
 import fs from "fs";
 import { pathToFileURL } from "url";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { db } from "./db";
 
 // ─────────────────────────────────────────────────────────────────────────────
